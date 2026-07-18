@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Install minimum supported Rust
         run: rustup toolchain install 1.86.0 --profile minimal --component rustfmt,clippy
