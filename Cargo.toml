@@ -1,30 +1,41 @@
 [package]
 name = "mcp-kali"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
-description = "Asynchronous Kali tool scheduler and MCP bridge"
+rust-version = "1.85"
+description = "Client and server for asynchronous Kali tool scheduling over MCP"
 license = "GPL-3.0-or-later"
+readme = "README.md"
+repository = "https://github.com/dariohy/my-mcp"
+keywords = ["kali", "mcp", "pentesting", "scheduler", "security"]
+categories = ["command-line-utilities", "development-tools"]
 
 [lib]
 name = "mcp_kali"
 path = "src/lib.rs"
 
 [[bin]]
-name = "mcp-kali"
-path = "src/main.rs"
+name = "mcp-kali-server"
+path = "src/bin/server.rs"
+
+[[bin]]
+name = "mcp-kali-client"
+path = "src/bin/client.rs"
 
 [dependencies]
 anyhow = "1.0"
 axum = "0.8"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5", features = ["derive", "env"] }
+clap_complete = "4.5"
+dotenvy = "0.15"
 libc = "0.2"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 shell-words = "1.1"
 tokio = { version = "1.0", features = ["fs", "io-std", "io-util", "macros", "process", "rt-multi-thread", "signal", "sync", "time"] }
-tokio-util = { version = "0.7", features = ["rt"] }
+tokio-util = { version = "0.7", features = ["io", "rt"] }
 tower-http = { version = "0.6", features = ["trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -32,3 +43,12 @@ uuid = { version = "1.0", features = ["serde", "v4"] }
 
 [dev-dependencies]
 tempfile = "3.0"
+
+# Keep the distributable client and server compact without removing runtime
+# features or user-facing error messages.
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"

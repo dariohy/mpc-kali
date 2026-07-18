@@ -6,27 +6,36 @@ use crate::{
 use anyhow::Result as AnyResult;
 use axum::{
     Json, Router,
-    extract::{Path, Query, State},
-    http::StatusCode,
+    body::Body,
+    extract::{DefaultBodyLimit, Path, Query, State},
+    http::{HeaderValue, StatusCode, header},
     response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, net::SocketAddr};
+use tokio_util::io::ReaderStream;
 use tower_http::trace::TraceLayer;
 use uuid::Uuid;
 
 pub async fn serve(address: SocketAddr, scheduler: Scheduler) -> AnyResult<()> {
     let app = Router::new()
         .route("/", get(index))
+        .route("/monitor", get(index))
         .route("/health", get(health))
         .route("/api/jobs", post(submit).get(list))
         .route("/api/jobs/{id}", get(get_job))
         .route("/api/jobs/{id}/cancel", post(cancel))
+        .route("/api/jobs/{id}/pause", post(pause))
+        .route("/api/jobs/{id}/resume", post(resume))
+        .route("/api/jobs/{id}/kill", post(kill))
         .route("/api/jobs/{id}/output", get(output))
+        .route("/api/jobs/{id}/tail", get(tail))
+        .route("/api/jobs/{id}/logs/{stream}", get(download_log))
         .route("/api/command", post(legacy_command))
         .route("/api/tools/{tool}", post(submit_tool))
+        .layer(DefaultBodyLimit::max(512 * 1024))
         .layer(TraceLayer::new_for_http())
         .with_state(scheduler);
     let listener = tokio::net::TcpListener::bind(address).await?;
@@ -161,6 +170,39 @@ async fn cancel(
         .map_err(|e| ApiError(StatusCode::CONFLICT, e.to_string()))
 }
 
+async fn pause(
+    State(scheduler): State<Scheduler>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Value>, ApiError> {
+    scheduler
+        .pause(id)
+        .await
+        .map(|j| Json(json!(j)))
+        .map_err(|error| ApiError(StatusCode::CONFLICT, error.to_string()))
+}
+
+async fn resume(
+    State(scheduler): State<Scheduler>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Value>, ApiError> {
+    scheduler
+        .resume(id)
+        .await
+        .map(|j| Json(json!(j)))
+        .map_err(|error| ApiError(StatusCode::CONFLICT, error.to_string()))
+}
+
+async fn kill(
+    State(scheduler): State<Scheduler>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Value>, ApiError> {
+    scheduler
+        .kill(id)
+        .await
+        .map(|j| Json(json!(j)))
+        .map_err(|error| ApiError(StatusCode::CONFLICT, error.to_string()))
+}
+
 #[derive(Deserialize)]
 struct OutputQuery {
     #[serde(default = "stdout")]
@@ -189,24 +231,76 @@ async fn output(
         .map_err(ApiError::from)
 }
 
+#[derive(Deserialize)]
+struct TailQuery {
+    #[serde(default = "stdout")]
+    stream: String,
+    #[serde(default = "tail_lines")]
+    lines: usize,
+}
+
+fn tail_lines() -> usize {
+    50
+}
+
+async fn tail(
+    State(scheduler): State<Scheduler>,
+    Path(id): Path<Uuid>,
+    Query(query): Query<TailQuery>,
+) -> Result<Json<Value>, ApiError> {
+    scheduler
+        .tail(id, &query.stream, query.lines)
+        .await
+        .map(|data| Json(json!({"job_id": id, "stream": query.stream, "lines": query.lines.clamp(1, 500), "data": data})))
+        .map_err(ApiError::from)
+}
+
+async fn download_log(
+    State(scheduler): State<Scheduler>,
+    Path((id, stream)): Path<(Uuid, String)>,
+) -> Result<Response, ApiError> {
+    let filename = format!("mcp-kali-{id}-{stream}.log");
+    let body = match scheduler.open_log(id, &stream).await? {
+        Some(file) => Body::from_stream(ReaderStream::new(file)),
+        None => Body::empty(),
+    };
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+        .header(
+            header::CONTENT_DISPOSITION,
+            format!("attachment; filename=\"{filename}\""),
+        )
+        .body(body)
+        .map_err(|error| ApiError(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))
+}
+
 async fn health(State(scheduler): State<Scheduler>) -> Json<Health> {
     let (queued, running, max_concurrency) = scheduler.counts().await;
     Json(Health {
         status: "healthy",
         service: "mcp-kali",
+        version: env!("CARGO_PKG_VERSION"),
         queued,
         running,
         max_concurrency,
     })
 }
 
-async fn index() -> Html<&'static str> {
-    Html(INDEX_HTML)
+async fn index() -> Response {
+    let mut response = Html(include_str!("dashboard.html")).into_response();
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(
+            "default-src 'none'; connect-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+        ),
+    );
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert("referrer-policy", HeaderValue::from_static("no-referrer"));
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
-
-const INDEX_HTML: &str = r#"<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>MCP Kali Jobs</title><style>
-:root{color-scheme:dark;font:15px system-ui;background:#0b1014;color:#dce7ec}body{max-width:1100px;margin:40px auto;padding:0 20px}h1{color:#67e8a5}button{background:#173b2c;color:#baffd8;border:1px solid #2f7657;padding:7px 11px;border-radius:5px;cursor:pointer}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{text-align:left;padding:10px;border-bottom:1px solid #26343d}code{font-size:12px}.state{font-weight:650}.failed,.timed_out,.interrupted{color:#ff8888}.succeeded{color:#67e8a5}.running{color:#ffd166}pre{background:#111a20;padding:16px;overflow:auto;max-height:420px;white-space:pre-wrap}</style></head>
-<body><h1>MCP Kali job monitor</h1><p>Durable, asynchronous command execution. This page refreshes every two seconds.</p><button onclick="load()">Refresh</button><table><thead><tr><th>State</th><th>Tool</th><th>Created</th><th>Job ID</th><th></th></tr></thead><tbody id="jobs"></tbody></table><pre id="output">Select a job to view stdout.</pre>
-<script>const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));async function load(){const r=await fetch('/api/jobs'),d=await r.json();jobs.innerHTML=d.jobs.map(j=>`<tr><td class="state ${j.state}">${esc(j.state)}</td><td>${esc(j.tool)}</td><td>${esc(j.created_at)}</td><td><code>${j.id}</code></td><td><button onclick="show('${j.id}')">Output</button></td></tr>`).join('')}async function show(id){const r=await fetch(`/api/jobs/${id}/output?limit=1048576`),d=await r.json();output.textContent=d.data||'(no stdout yet)'}load();setInterval(load,2000)</script></body></html>"#;

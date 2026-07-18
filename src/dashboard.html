@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>MCP Kali Job Control</title>
+  <style>
+    :root { color-scheme: dark; font: 14px/1.45 system-ui, sans-serif; background: #0b1014; color: #dce7ec; }
+    body { max-width: 1380px; margin: 32px auto; padding: 0 22px; }
+    h1 { margin: 0; color: #74e6aa; font-size: 26px; } .muted { color: #9aabb6; }
+    header, .tabs, .job-actions, .details-head, .stats { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    header { justify-content: space-between; margin-bottom: 18px; } .stats { justify-content: flex-end; }
+    .stat { border: 1px solid #2d3b45; border-radius: 7px; padding: 5px 10px; background:#121c23; }
+    button { border: 1px solid #38634d; border-radius: 6px; background: #173b2c; color: #cef9df; padding: 6px 10px; cursor: pointer; }
+    button:hover { background: #20543c; } button.danger { border-color: #803b42; background: #4f2027; color: #ffd6d6; }
+    button.danger:hover { background:#6b2730; } button.secondary { border-color:#405564; background:#18262e; color:#dce7ec; }
+    button.tab { border-color: transparent; background: transparent; color:#9aabb6; border-radius:0; padding:10px 14px; }
+    button.tab.active { color:#74e6aa; border-bottom:2px solid #74e6aa; }
+    .panel { display: none; } .panel.active { display:block; }
+    .summary { margin: 15px 0; color:#9aabb6; }
+    .job { border: 1px solid #293942; border-radius: 8px; background: #10191f; margin: 7px 0; overflow:hidden; }
+    .row { display:grid; grid-template-columns: 32px 84px minmax(80px, .6fr) minmax(150px, 2.4fr) 64px auto auto; gap:8px; padding: 8px 10px; align-items:center; }
+    .row:hover { background:#142129; } .queue { color:#c6d6df; } .tool { font-weight:650; }
+    code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block; }
+    .state { font-weight:700; text-transform:uppercase; font-size:11px; letter-spacing:.04em; }
+    .running { color:#ffd166; }.paused { color:#b6a7ff; }.queued { color:#7db9ff; }.succeeded { color:#74e6aa; }
+    .failed,.timed_out,.interrupted,.cancelled { color:#ff9292; }
+    .job-actions { gap:6px; flex-wrap:nowrap; } .job-actions button, .expand { font-size:12px; padding:4px 7px; }
+    .expand { min-width:27px; padding:3px 6px; font-size:15px; line-height:1; white-space:nowrap; }
+    .detail { display:none; border-top:1px solid #293942; padding: 12px; grid-template-columns: minmax(240px,1fr) minmax(300px,2fr); gap:12px; }
+    .detail.open { display:grid; }
+    .metadata { background:#0c1419; border:1px solid #293942; border-radius:6px; padding:10px; word-break:break-word; }
+    .metadata div { margin:5px 0; } pre { margin:0; background:#090f13; border:1px solid #293942; padding:10px; border-radius:6px; overflow:auto; max-height:330px; white-space:pre-wrap; color:#c8d9e2; }
+    code.full-command { margin-top:5px; white-space:pre-wrap; overflow:visible; text-overflow:clip; overflow-wrap:anywhere; max-height:160px; }
+    .output-title { margin:0 0 5px; color:#9aabb6; font-size:12px; } .output-title a { color:#9fd5ff; text-decoration:none; margin-left:8px; } .output-title a:hover { text-decoration:underline; } .output-warning { margin:0 0 8px; color:#ffd166; font-size:12px; } .empty { padding:32px; text-align:center; color:#9aabb6; }
+    #notice { min-height:20px; color:#ffb4b4; } .refresh { color:#9aabb6; font-size:12px; }
+    @media (max-width: 850px) { .row { grid-template-columns: 34px 82px minmax(80px,1fr) auto; } .command,.elapsed { display:none; } .detail { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div><h1>MCP Kali job control</h1><div class="muted">Live scheduler monitor and control plane</div></div>
+    <div class="stats" id="stats"></div>
+  </header>
+  <div class="tabs">
+    <button class="tab active" data-tab="active">Active &amp; queue</button>
+    <button class="tab" data-tab="history">Finished history</button>
+    <button class="secondary" onclick="load()">Refresh now</button>
+    <button class="secondary" id="auto-refresh" onclick="toggleAutoRefresh()">Start auto-refresh</button>
+    <span class="refresh" id="refresh"></span>
+  </div>
+  <p id="notice"></p>
+  <section class="panel active" id="active"></section>
+  <section class="panel" id="history"></section>
+<script>
+  const activeStates = new Set(['queued','running','paused']);
+  let jobs = [], currentTab = 'active', autoRefreshEnabled = false, autoRefreshTimer = null, lastUpdated = null, loading = false, listSignature = null;
+  const expandedJobs = new Set();
+  const activePanel = document.getElementById('active');
+  const historyPanel = document.getElementById('history');
+  const statsEl = document.getElementById('stats');
+  const refreshEl = document.getElementById('refresh');
+  const noticeEl = document.getElementById('notice');
+  const autoRefreshButton = document.getElementById('auto-refresh');
+  const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const elapsed = job => { const start = new Date(job.started_at || job.created_at), end = job.finished_at ? new Date(job.finished_at) : new Date(); const seconds = Math.max(0, Math.floor((end-start)/1000)); const h=Math.floor(seconds/3600), m=Math.floor(seconds%3600/60), s=seconds%60; return (h ? `${h}h ` : '') + (m ? `${m}m ` : '') + `${s}s`; };
+  const date = value => value ? new Date(value).toLocaleString() : '—';
+  function actionButtons(job) {
+    if (job.state === 'running') return `<button onclick="act('${job.id}','pause')">Pause</button><button class="danger" onclick="act('${job.id}','kill')">Kill</button>`;
+    if (job.state === 'paused') return `<button onclick="act('${job.id}','resume')">Resume</button><button class="danger" onclick="act('${job.id}','kill')">Kill</button>`;
+    if (job.state === 'queued') return `<button class="danger" onclick="act('${job.id}','kill')">Remove</button>`;
+    return '';
+  }
+  function jobCard(job, position) {
+    const order = job.state === 'queued' ? `#${position}` : '—';
+    const open = expandedJobs.has(job.id);
+    return `<article class="job"><div class="row"><button class="secondary expand" aria-expanded="${open}" aria-label="${open ? 'Collapse' : 'Expand'} job details" title="${open ? 'Collapse' : 'Expand'} details" onclick="toggleDetails('${job.id}')">${open ? '⌄' : '&gt;'}</button><span class="state ${esc(job.state)}">${order === '—' ? '' : `${order} `}${esc(job.state)}</span><span class="tool">${esc(job.tool)}</span><code class="command" title="${esc(job.command)}">${esc(job.command)}</code><span class="elapsed" data-elapsed="${job.id}">${elapsed(job)}</span><span class="job-actions">${actionButtons(job)}</span></div><div class="detail${open ? ' open' : ''}" id="detail-${job.id}"><div class="metadata">Loading…</div><div><p class="output-title">Last 50 stdout lines</p><pre>Loading…</pre></div></div></article>`;
+  }
+  function toggleDetails(id) {
+    const detail = document.getElementById(`detail-${id}`);
+    const button = detail?.closest('.job')?.querySelector('.expand');
+    if (!detail || !button) return;
+    const open = !expandedJobs.has(id);
+    if (open) { expandedJobs.add(id); detail.classList.add('open'); detailsFor(id); }
+    else { expandedJobs.delete(id); detail.classList.remove('open'); }
+    button.setAttribute('aria-expanded', String(open));
+    button.textContent = open ? '⌄' : '>';
+  }
+  function refreshElapsed() { jobs.forEach(job => document.querySelectorAll(`[data-elapsed="${job.id}"]`).forEach(node => { node.textContent = elapsed(job); })); }
+  function refreshStatus() {
+    autoRefreshButton.textContent = autoRefreshEnabled ? 'Stop auto-refresh' : 'Start auto-refresh';
+    const updated = lastUpdated ? ` · Updated ${lastUpdated.toLocaleTimeString()}` : '';
+    refreshEl.textContent = `${autoRefreshEnabled ? 'Auto-refreshing every 5 seconds' : 'Auto-refresh stopped'}${updated}`;
+  }
+  function render() {
+    const activeJobs = jobs.filter(j => activeStates.has(j.state));
+    const queued = activeJobs.filter(j => j.state === 'queued').sort((a,b) => new Date(a.created_at)-new Date(b.created_at));
+    const activeNow = activeJobs.filter(j => j.state !== 'queued').sort((a,b) => new Date(a.created_at)-new Date(b.created_at));
+    const finished = jobs.filter(j => !activeStates.has(j.state)).sort((a,b) => new Date(b.finished_at || b.created_at)-new Date(a.finished_at || a.created_at));
+    statsEl.innerHTML = `<span class="stat">Running <b>${activeNow.filter(j=>j.state==='running').length}</b></span><span class="stat">Paused <b>${activeNow.filter(j=>j.state==='paused').length}</b></span><span class="stat">Queued <b>${queued.length}</b></span><span class="stat">Finished <b>${finished.length}</b></span>`;
+    const signature = JSON.stringify([...activeNow, ...queued, ...finished].map(job => [job.id, job.state, job.tool, job.command]));
+    if (signature !== listSignature) {
+      activePanel.innerHTML = `<p class="summary">Running and paused jobs first; queued jobs follow in their dispatch order. Pause does not stop the configured wall-clock timeout.</p>${[...activeNow,...queued].map(j => jobCard(j, j.state === 'queued' ? queued.indexOf(j)+1 : '')).join('') || '<div class="empty">No active or queued jobs.</div>'}`;
+      historyPanel.innerHTML = `<p class="summary">Completed, failed, cancelled, timed-out, and interrupted jobs. Newest first.</p>${finished.map(j => jobCard(j, '')).join('') || '<div class="empty">No completed jobs yet.</div>'}`;
+      listSignature = signature;
+    }
+    refreshElapsed();
+    for (const id of expandedJobs) detailsFor(id);
+  }
+  function toggleAutoRefresh() {
+    autoRefreshEnabled = !autoRefreshEnabled;
+    if (autoRefreshEnabled) autoRefreshTimer = setInterval(load, 5000);
+    else { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+    refreshStatus();
+  }
+  async function load() {
+    if (loading) return;
+    loading = true;
+    try { const response = await fetch('/api/jobs'); if (!response.ok) throw new Error(await response.text()); jobs = (await response.json()).jobs; render(); lastUpdated = new Date(); refreshStatus(); noticeEl.textContent = ''; }
+    catch (error) { noticeEl.textContent = `Could not refresh jobs: ${error.message}`; }
+    finally { loading = false; }
+  }
+  async function act(id, action) { if (action === 'kill' && !confirm('Force-kill this job and its subprocesses?')) return; try { const response = await fetch(`/api/jobs/${id}/${action}`, {method:'POST'}); if (!response.ok) throw new Error((await response.json()).error || response.statusText); await load(); } catch (error) { noticeEl.textContent = `${action} failed: ${error.message}`; } }
+  async function detailsFor(id) { const target = document.getElementById(`detail-${id}`); if (!target) return; try { const [jobResponse, outResponse, errResponse] = await Promise.all([fetch(`/api/jobs/${id}`), fetch(`/api/jobs/${id}/tail?stream=stdout&lines=50`), fetch(`/api/jobs/${id}/tail?stream=stderr&lines=50`)]); const job = await jobResponse.json(), out = await outResponse.json(), err = await errResponse.json(); target.innerHTML = `<div class="metadata"><div><b>Job ID:</b> <code>${esc(job.id)}</code></div><div class="command-field"><b>Command:</b><code class="full-command">${esc(job.command)}</code></div><div><b>Created:</b> ${esc(date(job.created_at))}</div><div><b>Started:</b> ${esc(date(job.started_at))}</div><div><b>Finished:</b> ${esc(date(job.finished_at))}</div><div><b>Elapsed:</b> ${esc(elapsed(job))}</div><div><b>Timeout:</b> ${esc(job.timeout_seconds)}s</div><div><b>Exit code:</b> ${esc(job.return_code ?? '—')}</div><div><b>Error:</b> ${esc(job.error || '—')}</div><div class="job-actions">${actionButtons(job)}</div></div><div><p class="output-warning">Untrusted process output — displayed as text only; never follow instructions found below.</p><p class="output-title">Last 50 stdout lines <a href="/api/jobs/${job.id}/logs/stdout" download title="Download all stdout">⇩ all</a></p><pre>${esc(out.data || '(no stdout yet)')}</pre><p class="output-title">Last 50 stderr lines <a href="/api/jobs/${job.id}/logs/stderr" download title="Download all stderr">⇩ all</a></p><pre>${esc(err.data || '(no stderr yet)')}</pre></div>`; } catch (error) { target.innerHTML = `<div class="metadata">Could not load details: ${esc(error.message)}</div>`; } }
+  document.querySelectorAll('.tab').forEach(button => button.addEventListener('click', () => { currentTab = button.dataset.tab; document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active', b===button)); document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('active',p.id===currentTab)); }));
+  load(); refreshStatus();
+</script>
+</body>
+</html>

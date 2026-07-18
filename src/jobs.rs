@@ -1,6 +1,7 @@
 use crate::models::{Job, JobState, OutputPage, SubmitJob};
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::Utc;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -9,7 +10,7 @@ use std::{
 };
 use tokio::{
     fs,
-    io::{AsyncReadExt, AsyncSeekExt},
+    io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
     process::Command,
     sync::{Mutex, Notify, Semaphore},
     time::timeout,
@@ -18,7 +19,28 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
+
 const MAX_OUTPUT_PAGE: usize = 1024 * 1024;
+const MAX_ARG_COUNT: usize = 1024;
+const MAX_ARG_BYTES: usize = 64 * 1024;
+const MAX_COMMAND_BYTES: usize = 256 * 1024;
+const MAX_TOOL_BYTES: usize = 128;
+
+#[derive(Serialize, Deserialize)]
+struct PrivateJobSpec {
+    argv: Vec<String>,
+    #[serde(default)]
+    webhook_url: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum StoredJobSpec {
+    Current(PrivateJobSpec),
+    Legacy(Vec<String>),
+}
 
 #[derive(Clone)]
 pub struct Scheduler {
@@ -29,30 +51,49 @@ struct Inner {
     root: PathBuf,
     jobs: Mutex<HashMap<Uuid, Job>>,
     cancellations: Mutex<HashMap<Uuid, CancellationToken>>,
+    process_ids: Mutex<HashMap<Uuid, i32>>,
     permits: Arc<Semaphore>,
     notify: Notify,
     default_timeout: u64,
     max_concurrency: usize,
+    reveal_sensitive_data: bool,
     webhook_client: reqwest::Client,
 }
 
 impl Scheduler {
     pub async fn open(root: PathBuf, max_concurrency: usize, default_timeout: u64) -> Result<Self> {
+        Self::open_with_sensitive_data(root, max_concurrency, default_timeout, false).await
+    }
+
+    /// Starts a scheduler with explicit control over public command redaction.
+    /// The execution specification remains private on disk in either mode.
+    pub async fn open_with_sensitive_data(
+        root: PathBuf,
+        max_concurrency: usize,
+        default_timeout: u64,
+        reveal_sensitive_data: bool,
+    ) -> Result<Self> {
         if max_concurrency == 0 {
             bail!("max_concurrency must be greater than zero");
         }
         fs::create_dir_all(&root)
             .await
             .context("create job state directory")?;
+        #[cfg(unix)]
+        fs::set_permissions(&root, std::os::unix::fs::PermissionsExt::from_mode(0o700))
+            .await
+            .context("secure job state directory")?;
         let scheduler = Self {
             inner: Arc::new(Inner {
                 root,
                 jobs: Mutex::new(HashMap::new()),
                 cancellations: Mutex::new(HashMap::new()),
+                process_ids: Mutex::new(HashMap::new()),
                 permits: Arc::new(Semaphore::new(max_concurrency)),
                 notify: Notify::new(),
                 default_timeout,
                 max_concurrency,
+                reveal_sensitive_data,
                 webhook_client: reqwest::Client::new(),
             }),
         };
@@ -78,11 +119,24 @@ impl Scheduler {
                 warn!(path = %metadata.display(), "ignoring invalid job metadata");
                 continue;
             };
-            job.argv = match fs::read(entry.path().join("command.json")).await {
-                Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
-                Err(_) => Vec::new(),
-            };
+            match fs::read(entry.path().join("command.json")).await {
+                Ok(bytes) => match serde_json::from_slice::<StoredJobSpec>(&bytes) {
+                    Ok(StoredJobSpec::Current(spec)) => {
+                        job.argv = spec.argv;
+                        job.webhook_url = spec.webhook_url;
+                    }
+                    Ok(StoredJobSpec::Legacy(argv)) => job.argv = argv,
+                    Err(_) => job.argv.clear(),
+                },
+                Err(_) => job.argv.clear(),
+            }
+            job.webhook_configured = job.webhook_url.is_some();
             let mut changed = false;
+            let displayed_command = display_command(&job.argv, self.inner.reveal_sensitive_data);
+            if job.command != displayed_command {
+                job.command = displayed_command;
+                changed = true;
+            }
             if job.argv.is_empty() && job.state == JobState::Queued {
                 job.state = JobState::Interrupted;
                 job.finished_at = Some(Utc::now());
@@ -107,6 +161,21 @@ impl Scheduler {
         if request.argv.is_empty() || request.argv[0].is_empty() {
             bail!("argv must contain an executable");
         }
+        if request.argv.len() > MAX_ARG_COUNT {
+            bail!("argv must contain at most {MAX_ARG_COUNT} arguments");
+        }
+        let mut command_bytes = 0usize;
+        for argument in &request.argv {
+            if argument.len() > MAX_ARG_BYTES {
+                bail!("each argument must be at most {MAX_ARG_BYTES} bytes");
+            }
+            command_bytes = command_bytes
+                .checked_add(argument.len())
+                .context("command size overflow")?;
+        }
+        if command_bytes > MAX_COMMAND_BYTES {
+            bail!("combined argument data must be at most {MAX_COMMAND_BYTES} bytes");
+        }
         let timeout_seconds = request
             .timeout_seconds
             .unwrap_or(self.inner.default_timeout);
@@ -115,6 +184,12 @@ impl Scheduler {
         }
         if let Some(url) = &request.webhook_url {
             let parsed = reqwest::Url::parse(url).context("invalid webhook_url")?;
+            if !parsed.username().is_empty() || parsed.password().is_some() {
+                bail!("webhook_url must not contain credentials");
+            }
+            if parsed.fragment().is_some() {
+                bail!("webhook_url must not contain a fragment");
+            }
             if parsed.scheme() != "https"
                 && !parsed
                     .host_str()
@@ -123,9 +198,15 @@ impl Scheduler {
                 bail!("webhook_url must use HTTPS (HTTP is allowed only for localhost)");
             }
         }
+        let tool = request.tool.unwrap_or_else(|| request.argv[0].clone());
+        if tool.is_empty() || tool.len() > MAX_TOOL_BYTES || tool.chars().any(char::is_control) {
+            bail!("tool must be 1 to {MAX_TOOL_BYTES} bytes without control characters");
+        }
+        let webhook_configured = request.webhook_url.is_some();
         let job = Job {
             id: Uuid::new_v4(),
-            tool: request.tool.unwrap_or_else(|| request.argv[0].clone()),
+            tool,
+            command: display_command(&request.argv, self.inner.reveal_sensitive_data),
             argv: request.argv,
             state: JobState::Queued,
             created_at: Utc::now(),
@@ -134,6 +215,7 @@ impl Scheduler {
             timeout_seconds,
             return_code: None,
             error: None,
+            webhook_configured,
             webhook_url: request.webhook_url,
         };
         persist_at(&self.inner.root, &job).await?;
@@ -179,7 +261,7 @@ impl Scheduler {
                 job.finished_at = Some(Utc::now());
                 persist_at(&self.inner.root, job).await?;
             }
-            JobState::Running => self
+            JobState::Running | JobState::Paused => self
                 .inner
                 .cancellations
                 .lock()
@@ -190,6 +272,74 @@ impl Scheduler {
             _ => bail!("job is already terminal"),
         }
         self.get(id).await.ok_or_else(|| anyhow!("job not found"))
+    }
+
+    pub async fn pause(&self, id: Uuid) -> Result<Job> {
+        self.signal(id, libc::SIGSTOP, JobState::Running, JobState::Paused)
+            .await
+    }
+
+    pub async fn resume(&self, id: Uuid) -> Result<Job> {
+        self.signal(id, libc::SIGCONT, JobState::Paused, JobState::Running)
+            .await
+    }
+
+    pub async fn kill(&self, id: Uuid) -> Result<Job> {
+        let state = self
+            .get(id)
+            .await
+            .ok_or_else(|| anyhow!("job not found"))?
+            .state;
+        if state == JobState::Queued {
+            return self.cancel(id).await;
+        }
+        if !matches!(state, JobState::Running | JobState::Paused) {
+            bail!("job is already terminal");
+        }
+        let pid = self
+            .inner
+            .process_ids
+            .lock()
+            .await
+            .get(&id)
+            .copied()
+            .ok_or_else(|| anyhow!("job is starting; retry force-kill"))?;
+        signal_process_group(pid, libc::SIGKILL)?;
+        if let Some(token) = self.inner.cancellations.lock().await.get(&id) {
+            token.cancel();
+        }
+        self.get(id).await.ok_or_else(|| anyhow!("job not found"))
+    }
+
+    async fn signal(
+        &self,
+        id: Uuid,
+        signal: i32,
+        expected: JobState,
+        next: JobState,
+    ) -> Result<Job> {
+        let state = self
+            .get(id)
+            .await
+            .ok_or_else(|| anyhow!("job not found"))?
+            .state;
+        if state != expected {
+            bail!("job must be {expected:?} to perform this action (currently {state:?})");
+        }
+        let pid = self
+            .inner
+            .process_ids
+            .lock()
+            .await
+            .get(&id)
+            .copied()
+            .ok_or_else(|| anyhow!("job is starting; retry this action"))?;
+        signal_process_group(pid, signal)?;
+        let mut jobs = self.inner.jobs.lock().await;
+        let job = jobs.get_mut(&id).ok_or_else(|| anyhow!("job not found"))?;
+        job.state = next;
+        persist_at(&self.inner.root, job).await?;
+        Ok(job.clone())
     }
 
     pub async fn output(
@@ -235,6 +385,47 @@ impl Scheduler {
             truncated: start + (read as u64) < size,
             data: String::from_utf8_lossy(&bytes).into_owned(),
         })
+    }
+
+    /// Opens a log for streaming to an authorized local API caller. The file can
+    /// continue growing while a running job writes to it.
+    pub async fn open_log(&self, id: Uuid, stream: &str) -> Result<Option<fs::File>> {
+        if self.get(id).await.is_none() {
+            bail!("job not found");
+        }
+        if !["stdout", "stderr"].contains(&stream) {
+            bail!("stream must be stdout or stderr");
+        }
+        match fs::File::open(self.job_dir(id).join(format!("{stream}.log"))).await {
+            Ok(file) => Ok(Some(file)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    pub async fn tail(&self, id: Uuid, stream: &str, lines: usize) -> Result<String> {
+        if self.get(id).await.is_none() {
+            bail!("job not found");
+        }
+        if !["stdout", "stderr"].contains(&stream) {
+            bail!("stream must be stdout or stderr");
+        }
+        let path = self.job_dir(id).join(format!("{stream}.log"));
+        let mut file = match fs::File::open(path).await {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(String::new()),
+            Err(error) => return Err(error.into()),
+        };
+        let size = file.metadata().await?.len();
+        let offset = size.saturating_sub(MAX_OUTPUT_PAGE as u64);
+        file.seek(std::io::SeekFrom::Start(offset)).await?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes).await?;
+        let text = String::from_utf8_lossy(&bytes);
+        let lines = lines.clamp(1, 500);
+        let mut tail: Vec<&str> = text.lines().rev().take(lines).collect();
+        tail.reverse();
+        Ok(tail.join("\n"))
     }
 
     fn job_dir(&self, id: Uuid) -> PathBuf {
@@ -295,14 +486,8 @@ impl Scheduler {
             .await
             .ok_or_else(|| anyhow!("job disappeared"))?;
         let dir = self.job_dir(id);
-        let stdout = std::fs::File::create(dir.join("stdout.log"))?;
-        let stderr = std::fs::File::create(dir.join("stderr.log"))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            stdout.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-            stderr.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-        }
+        let stdout = create_private_log(&dir.join("stdout.log"))?;
+        let stderr = create_private_log(&dir.join("stderr.log"))?;
         let mut command = Command::new(&job.argv[0]);
         command
             .args(&job.argv[1..])
@@ -331,23 +516,29 @@ impl Scheduler {
                 None,
                 Some(format!("failed to start {}: {error}", job.argv[0])),
             ),
-            Ok(mut child) => tokio::select! {
-                _ = token.cancelled() => {
-                    terminate(&mut child).await;
-                    (JobState::Cancelled, None, None)
+            Ok(mut child) => {
+                if let Some(pid) = child.id() {
+                    self.inner.process_ids.lock().await.insert(id, pid as i32);
                 }
-                result = timeout(Duration::from_secs(job.timeout_seconds), child.wait()) => match result {
-                    Err(_) => {
+                tokio::select! {
+                    _ = token.cancelled() => {
                         terminate(&mut child).await;
-                        (JobState::TimedOut, None, Some(format!("timed out after {} seconds", job.timeout_seconds)))
+                        (JobState::Cancelled, None, None)
                     }
-                    Ok(Err(error)) => (JobState::Failed, None, Some(error.to_string())),
-                    Ok(Ok(status)) if status.success() => (JobState::Succeeded, status.code(), None),
-                    Ok(Ok(status)) => (JobState::Failed, status.code(), None),
+                    result = timeout(Duration::from_secs(job.timeout_seconds), child.wait()) => match result {
+                        Err(_) => {
+                            terminate(&mut child).await;
+                            (JobState::TimedOut, None, Some(format!("timed out after {} seconds", job.timeout_seconds)))
+                        }
+                        Ok(Err(error)) => (JobState::Failed, None, Some(error.to_string())),
+                        Ok(Ok(status)) if status.success() => (JobState::Succeeded, status.code(), None),
+                        Ok(Ok(status)) => (JobState::Failed, status.code(), None),
+                    }
                 }
-            },
+            }
         };
         self.inner.cancellations.lock().await.remove(&id);
+        self.inner.process_ids.lock().await.remove(&id);
         let completed = {
             let mut jobs = self.inner.jobs.lock().await;
             let job = jobs
@@ -380,7 +571,10 @@ impl Scheduler {
                 info!(id = %job.id, "webhook delivered")
             }
             Ok(response) => warn!(id = %job.id, status = %response.status(), "webhook rejected"),
-            Err(error) => warn!(id = %job.id, %error, "webhook delivery failed"),
+            Err(error) => {
+                let error = error.without_url();
+                warn!(id = %job.id, %error, "webhook delivery failed")
+            }
         }
     }
 }
@@ -400,26 +594,105 @@ async fn terminate(child: &mut tokio::process::Child) {
     let _ = child.kill().await;
 }
 
+fn signal_process_group(pid: i32, signal: i32) -> Result<()> {
+    #[cfg(unix)]
+    {
+        // Every child starts a new process group, so job controls include scanner
+        // subprocesses rather than leaving descendants behind.
+        if unsafe { libc::kill(-pid, signal) } == 0 {
+            return Ok(());
+        }
+        Err(std::io::Error::last_os_error().into())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (pid, signal);
+        bail!("pause, resume, and force-kill require Unix process groups")
+    }
+}
+
+fn display_command(argv: &[String], reveal_sensitive_data: bool) -> String {
+    const SECRET_FLAGS: &[&str] = &["-p", "-P", "--password", "--password-file", "--data", "-x"];
+    let mut redact_next = false;
+    argv.iter()
+        .map(|argument| {
+            let value = if reveal_sensitive_data {
+                argument.clone()
+            } else if redact_next {
+                redact_next = false;
+                "[REDACTED]".to_owned()
+            } else if SECRET_FLAGS.contains(&argument.as_str()) {
+                redact_next = true;
+                argument.clone()
+            } else if argument.starts_with("--password=") || argument.starts_with("--data=") {
+                format!(
+                    "{}[REDACTED]",
+                    argument
+                        .split_once('=')
+                        .map(|(prefix, _)| format!("{prefix}="))
+                        .unwrap_or_default()
+                )
+            } else {
+                argument.clone()
+            };
+            shell_quote(&value)
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn shell_quote(value: &str) -> String {
+    if !value.is_empty()
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "_+-./:=@".contains(c))
+    {
+        value.to_owned()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
+}
+
 async fn persist_at(root: &Path, job: &Job) -> Result<()> {
     let dir = root.join(job.id.to_string());
     fs::create_dir_all(&dir).await?;
+    #[cfg(unix)]
+    fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o700)).await?;
     let final_path = dir.join("job.json");
     let temporary = dir.join("job.json.tmp");
-    fs::write(&temporary, serde_json::to_vec_pretty(job)?).await?;
+    write_private(&temporary, &serde_json::to_vec_pretty(job)?).await?;
     fs::rename(temporary, final_path).await?;
-    fs::write(dir.join("command.json"), serde_json::to_vec(&job.argv)?).await?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).await?;
-        fs::set_permissions(dir.join("job.json"), std::fs::Permissions::from_mode(0o600)).await?;
-        fs::set_permissions(
-            dir.join("command.json"),
-            std::fs::Permissions::from_mode(0o600),
-        )
-        .await?;
-    }
+    let private = PrivateJobSpec {
+        argv: job.argv.clone(),
+        webhook_url: job.webhook_url.clone(),
+    };
+    write_private(&dir.join("command.json"), &serde_json::to_vec(&private)?).await?;
     Ok(())
+}
+
+async fn write_private(path: &Path, contents: &[u8]) -> Result<()> {
+    let mut options = fs::OpenOptions::new();
+    options.create(true).truncate(true).write(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file = options.open(path).await?;
+    #[cfg(unix)]
+    file.set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o600))
+        .await?;
+    file.write_all(contents).await?;
+    file.flush().await?;
+    Ok(())
+}
+
+fn create_private_log(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).truncate(true).write(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let file = options.open(path)?;
+    #[cfg(unix)]
+    file.set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
+    Ok(file)
 }
 
 #[cfg(test)]
@@ -457,6 +730,21 @@ mod tests {
                 .data,
             "hello"
         );
+        let mut log = scheduler.open_log(job.id, "stdout").await.unwrap().unwrap();
+        let mut downloaded = String::new();
+        log.read_to_string(&mut downloaded).await.unwrap();
+        assert_eq!(downloaded, "hello");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode(temp.path()), 0o700);
+            assert_eq!(mode(&scheduler.job_dir(job.id)), 0o700);
+            assert_eq!(mode(&scheduler.job_dir(job.id).join("job.json")), 0o600);
+            assert_eq!(mode(&scheduler.job_dir(job.id).join("command.json")), 0o600);
+            assert_eq!(mode(&scheduler.job_dir(job.id).join("stdout.log")), 0o600);
+            assert_eq!(mode(&scheduler.job_dir(job.id).join("stderr.log")), 0o600);
+        }
     }
 
     #[tokio::test]
@@ -496,5 +784,74 @@ mod tests {
             scheduler.get(second.id).await.unwrap().state,
             JobState::Cancelled
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn running_job_can_be_paused_resumed_and_force_killed() {
+        let temp = tempfile::tempdir().unwrap();
+        let scheduler = Scheduler::open(temp.path().into(), 1, 10).await.unwrap();
+        let job = scheduler
+            .submit(SubmitJob {
+                tool: None,
+                argv: vec!["sleep".into(), "10".into()],
+                timeout_seconds: None,
+                webhook_url: None,
+            })
+            .await
+            .unwrap();
+        for _ in 0..100 {
+            if scheduler.get(job.id).await.unwrap().state == JobState::Running {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        for _ in 0..100 {
+            if scheduler.pause(job.id).await.is_ok() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert_eq!(scheduler.get(job.id).await.unwrap().state, JobState::Paused);
+        scheduler.resume(job.id).await.unwrap();
+        assert_eq!(
+            scheduler.get(job.id).await.unwrap().state,
+            JobState::Running
+        );
+        scheduler.kill(job.id).await.unwrap();
+        for _ in 0..100 {
+            if scheduler.get(job.id).await.unwrap().state.is_terminal() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(
+            scheduler.get(job.id).await.unwrap().state,
+            JobState::Cancelled
+        );
+    }
+
+    #[test]
+    fn command_display_redacts_by_default_and_can_reveal() {
+        let argv = vec!["hydra".into(), "-p".into(), "super-secret".into()];
+        assert_eq!(display_command(&argv, false), "hydra -p '[REDACTED]'");
+        assert_eq!(display_command(&argv, true), "hydra -p super-secret");
+    }
+
+    #[tokio::test]
+    async fn rejects_oversized_job_submissions() {
+        let temp = tempfile::tempdir().unwrap();
+        let scheduler = Scheduler::open(temp.path().into(), 1, 10).await.unwrap();
+        let result = scheduler
+            .submit(SubmitJob {
+                tool: None,
+                argv: vec!["printf".into(), "x".repeat(MAX_ARG_BYTES + 1)],
+                timeout_seconds: None,
+                webhook_url: None,
+            })
+            .await;
+        assert!(result.is_err());
+        let error = result.err().unwrap();
+        assert!(error.to_string().contains("each argument"));
     }
 }

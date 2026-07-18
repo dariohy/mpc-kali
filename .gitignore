@@ -1,5 +1,8 @@
 /target/
 /var/
 *.log
+.env
+.env.*
+!.env.example
+!examples/*.example
 .DS_Store
-
