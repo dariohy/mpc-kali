@@ -35,7 +35,7 @@ Confirm that:
   output, or generated evidence;
 - `LICENSE` and `THIRD_PARTY_NOTICES.md` are included in the Cargo package;
 - the upstream MIT attribution remains intact;
-- the repository description, topics, and URL refer to `dariohy/mpc-kali`;
+- the repository description, topics, and URL refer to `dariohy/mcp-kali`;
 - GitHub account MFA and recovery methods are configured; and
 - the default branch remains `main`.
 

@@ -17,7 +17,7 @@ community project; response times and implementation are not guaranteed.
 
 Do not report vulnerabilities in a public issue. Follow
 [SECURITY.md](SECURITY.md) and use a
-[private security advisory](https://github.com/dariohy/mpc-kali/security/advisories/new).
+[private security advisory](https://github.com/dariohy/mcp-kali/security/advisories/new).
 
 ## Pentesting engagements
 

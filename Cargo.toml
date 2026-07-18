@@ -6,7 +6,7 @@ rust-version = "1.86"
 description = "Client and server for asynchronous Kali tool scheduling over MCP"
 license = "GPL-3.0-or-later"
 readme = "README.md"
-repository = "https://github.com/dariohy/mpc-kali"
+repository = "https://github.com/dariohy/mcp-kali"
 keywords = ["kali", "mcp", "pentesting", "scheduler", "security"]
 categories = ["command-line-utilities", "development-tools"]
 

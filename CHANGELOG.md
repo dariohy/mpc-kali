@@ -5,7 +5,10 @@ All notable changes to MCP Kali are documented here. The project follows
 
 ## [Unreleased]
 
-No changes yet.
+### Changed
+
+- Renamed the public repository from `dariohy/mpc-kali` to
+  `dariohy/mcp-kali` and updated canonical project links.
 
 ## [1.1.0] - 2026-07-18
 
@@ -93,6 +96,6 @@ No changes yet.
 - There is no automatic job-retention policy; operators must manage the private
   state directory according to their evidence-retention requirements.
 
-[Unreleased]: https://github.com/dariohy/mpc-kali/compare/v1.1.0...HEAD
-[1.1.0]: https://github.com/dariohy/mpc-kali/releases/tag/v1.1.0
-[1.0.0]: https://github.com/dariohy/mpc-kali/releases/tag/v1.0.0
+[Unreleased]: https://github.com/dariohy/mcp-kali/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/dariohy/mcp-kali/releases/tag/v1.1.0
+[1.0.0]: https://github.com/dariohy/mcp-kali/releases/tag/v1.0.0

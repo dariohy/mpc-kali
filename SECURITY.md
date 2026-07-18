@@ -12,7 +12,7 @@
 
 Do not open a public issue containing exploit details, credentials, customer
 data, or pentest evidence. Use GitHub's private security-advisory feature for
-[`dariohy/mcp-kali`](https://github.com/dariohy/mpc-kali/security/advisories/new)
+[`dariohy/mcp-kali`](https://github.com/dariohy/mcp-kali/security/advisories/new)
 when available, or contact the repository owner through a previously
 established private channel.
 

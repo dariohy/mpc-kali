@@ -1,6 +1,6 @@
 # MCP Kali 1.1.0
 
-[![CI](https://github.com/dariohy/mpc-kali/actions/workflows/ci.yml/badge.svg)](https://github.com/dariohy/mpc-kali/actions/workflows/ci.yml)
+[![CI](https://github.com/dariohy/mcp-kali/actions/workflows/ci.yml/badge.svg)](https://github.com/dariohy/mcp-kali/actions/workflows/ci.yml)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 
 MCP Kali is a Rust client/server system for scheduling Kali Linux security tools
@@ -12,7 +12,7 @@ to an MCP host and returns job IDs immediately.
 Use MCP Kali only on systems and targets you are explicitly authorized to test.
 
 **Project status:** `v1.1.0` is the current stable release. The immutable
-[`v1.0.0`](https://github.com/dariohy/mpc-kali/tree/v1.0.0) tag remains
+[`v1.0.0`](https://github.com/dariohy/mcp-kali/tree/v1.0.0) tag remains
 available as the first public release line.
 
 ## Contents
