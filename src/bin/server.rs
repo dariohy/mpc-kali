@@ -1,22 +1,25 @@
 use anyhow::{Result, bail};
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{Shell, generate};
-use mcp_kali::jobs::Scheduler;
-use mcp_kali::plugins::{PluginRegistry, default_system_data_dir};
+use mcp_kali::{
+    config::{default_config_dir, default_state_dir, default_system_data_dir},
+    jobs::Scheduler,
+    plugins::PluginRegistry,
+};
 use std::{net::SocketAddr, path::PathBuf};
 use tracing_subscriber::EnvFilter;
 
 /// Kali-side scheduler, API, and job-control dashboard.
 #[derive(Parser)]
 #[command(
-    name = "mcp-kali-server",
+    name = "mpc-kali",
     version,
     about = "Kali-side job scheduler, HTTP API, and dashboard"
 )]
 struct Cli {
-    /// Load defaults from this env file. Shell variables and CLI flags override it.
-    #[arg(long, env = "MCP_KALI_ENV_FILE", global = true, value_name = "PATH")]
-    env_file: Option<PathBuf>,
+    /// Load defaults from this configuration file. Shell variables and CLI flags override it.
+    #[arg(long, env = "MCP_KALI_CONFIG_FILE", global = true, value_name = "PATH")]
+    config_file: Option<PathBuf>,
 
     /// Address for the local HTTP API and dashboard.
     #[arg(long, env = "MCP_KALI_BIND", default_value = "127.0.0.1:5000")]
@@ -26,7 +29,7 @@ struct Cli {
     #[arg(
         long,
         env = "MCP_KALI_STATE_DIR",
-        default_value = "/var/lib/mcp-kali/jobs"
+        default_value_os_t = default_state_dir()
     )]
     state_dir: PathBuf,
 
@@ -48,7 +51,7 @@ struct Cli {
     system_data_dir: PathBuf,
 
     /// Administrator plugin and capability-catalog overlay directory.
-    #[arg(long, env = "MCP_KALI_CONFIG_DIR", default_value = "/etc/mcp-kali")]
+    #[arg(long, env = "MCP_KALI_CONFIG_DIR", default_value_os_t = default_config_dir())]
     config_dir: PathBuf,
 
     /// Disable the privileged Core Plugin execute_command escape hatch.
@@ -78,14 +81,14 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    mcp_kali::config::load_env_file()?;
+    mcp_kali::config::load_config_file()?;
     let cli = Cli::parse();
-    let _ = &cli.env_file;
+    let _ = &cli.config_file;
     if let Some(Commands::Completions { shell }) = cli.command {
         generate(
             shell,
             &mut Cli::command(),
-            "mcp-kali-server",
+            "mpc-kali",
             &mut std::io::stdout(),
         );
         return Ok(());

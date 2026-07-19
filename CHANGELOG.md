@@ -18,14 +18,30 @@ All notable changes to MCP Kali are documented here. The project follows
 
 ### Changed
 
-- Set the unreleased development version to 1.3.0.
+- `make install-local` now creates a self-contained non-root user installation
+  under `~/.mcp-kali` with `bin`, `etc`, `share/plugins`, and `var/jobs`.
+- User installation creates or updates safe `~/.local/bin` symlinks for both
+  MCP Kali binaries.
+- Replaced the per-user `.env` contract with a non-secret `mcp-kali.conf`
+  configuration file and the canonical `--config-file` / `MCP_KALI_CONFIG_FILE`
+  selectors.
+- Moved the shipped Capability Catalog into the Plugin data directory and made
+  per-user paths the runtime defaults.
+- Set the unreleased development version to 2.0.0.
 - Replaced hard-coded scanner and command submission routes with generic Plugin
   discovery and `POST /api/tools/{tool_name}/invoke`.
 - Made the MCP bridge retrieve tool definitions from the server at `tools/list`.
-- Extended local installation to place packaged runtime data under the install
-  prefix's `share/mcp-kali` directory.
+- Extended local installation to place packaged runtime data in the
+  self-contained `~/.mcp-kali/share/plugins` tree.
 - Renamed the public repository from `dariohy/mpc-kali` to
   `dariohy/mcp-kali` and updated canonical project links.
+
+### Removed
+
+- Legacy `--env-file`, `MCP_KALI_ENV_FILE`, `mcp-kali.env`, and
+  `~/.envs/.env_mcp-kali` configuration support.
+- `mcp-kali-server` and `mcp-kali-client` binary names; use `mpc-kali` and
+  `mpc-kali-bridge` instead.
 
 ## [1.1.0] - 2026-07-18
 

@@ -5,19 +5,19 @@ use reqwest::Url;
 use std::{net::IpAddr, path::PathBuf};
 use tracing_subscriber::EnvFilter;
 
-/// Local stdio MCP bridge that talks to an mcp-kali-server instance.
+/// Local stdio MCP bridge that talks to an mpc-kali instance.
 #[derive(Parser)]
 #[command(
-    name = "mcp-kali-client",
+    name = "mpc-kali-bridge",
     version,
-    about = "Local stdio MCP bridge for mcp-kali-server"
+    about = "Local stdio MCP bridge for mpc-kali"
 )]
 struct Cli {
-    /// Load defaults from this env file. Shell variables and CLI flags override it.
-    #[arg(long, env = "MCP_KALI_ENV_FILE", global = true, value_name = "PATH")]
-    env_file: Option<PathBuf>,
+    /// Load defaults from this configuration file. Shell variables and CLI flags override it.
+    #[arg(long, env = "MCP_KALI_CONFIG_FILE", global = true, value_name = "PATH")]
+    config_file: Option<PathBuf>,
 
-    /// Base URL of the Kali-side mcp-kali-server API.
+    /// Base URL of the Kali-side mpc-kali API.
     #[arg(long, env = "MCP_KALI_SERVER", default_value = "http://127.0.0.1:5000")]
     server: Url,
 
@@ -39,14 +39,14 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    mcp_kali::config::load_env_file()?;
+    mcp_kali::config::load_config_file()?;
     let cli = Cli::parse();
-    let _ = &cli.env_file;
+    let _ = &cli.config_file;
     if let Some(Commands::Completions { shell }) = cli.command {
         generate(
             shell,
             &mut Cli::command(),
-            "mcp-kali-client",
+            "mpc-kali-bridge",
             &mut std::io::stdout(),
         );
         return Ok(());

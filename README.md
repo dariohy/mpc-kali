@@ -1,4 +1,4 @@
-# MCP Kali 1.3.0
+# MCP Kali 2.0.0
 
 [![CI](https://github.com/dariohy/mcp-kali/actions/workflows/ci.yml/badge.svg)](https://github.com/dariohy/mcp-kali/actions/workflows/ci.yml)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
@@ -11,7 +11,7 @@ to an MCP host and returns job IDs immediately.
 
 Use MCP Kali only on systems and targets you are explicitly authorized to test.
 
-**Project status:** `1.3.0` is the current unreleased development line;
+**Project status:** `2.0.0` is the current unreleased development line;
 `v1.1.0` remains the current stable release.
 
 ## Contents
@@ -35,14 +35,14 @@ Use MCP Kali only on systems and targets you are explicitly authorized to test.
 ## Architecture
 
 ```text
-MCP host -> mcp-kali-client -> HTTP(S) -> mcp-kali-server -> Plugin Registry
+MCP host -> mpc-kali-bridge -> HTTP(S) -> mpc-kali -> Plugin Registry
                                                            -> durable queue
                                                            -> bounded workers
                                                            -> job files/API
 ```
 
-- `mcp-kali-server` runs on the Kali host and executes tools.
-- `mcp-kali-client` runs beside the MCP host and speaks newline-delimited MCP
+- `mpc-kali` runs on the Kali host and executes tools.
+- `mpc-kali-bridge` runs beside the MCP host and speaks newline-delimited MCP
   JSON-RPC over stdin/stdout. It never executes Kali tools locally.
 - Every submission returns a UUID job ID. Agents can do other work and inspect
   the job later rather than repeatedly blocking on a command.
@@ -75,26 +75,48 @@ cargo build --release
 The size-optimized binaries are:
 
 ```text
-target/release/mcp-kali-server
-target/release/mcp-kali-client
+target/release/mpc-kali
+target/release/mpc-kali-bridge
 ```
 
-Install both binaries under `~/.local/bin` and packaged Plugin data under
-`~/.local/share/mcp-kali`:
+`make install-local` creates a self-contained per-user runtime tree:
+
+```text
+~/.mcp-kali/
+├── bin/                         # mpc-kali and mpc-kali-bridge
+├── etc/
+│   ├── mcp-kali.conf            # normal, non-secret user configuration
+│   └── plugins/                 # administrator-overlay Plugins and catalog
+├── share/plugins/               # shipped Plugins and capability catalog
+│   ├── capability-catalog.yaml
+│   └── <plugin>/plugin.yaml
+└── var/jobs/                    # private durable job state and output
+```
+
+Install it with:
 
 ```bash
 make install-local
+```
+
+The installer also creates or updates symlinks for both binaries in
+`~/.local/bin`. If that directory is not already on `PATH`, add it:
+
+```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Override the installation directory when needed:
+For safety, installation refuses to replace a non-symlink at either link path.
+
+Use a different self-contained user directory when needed:
 
 ```bash
-make install-local INSTALL_DIR=/usr/local/bin
+make install-local MCP_KALI_HOME=/path/to/mcp-kali
 ```
 
-`DATA_DIR` defaults to the sibling `share/mcp-kali` directory under the same
-prefix and can be overridden explicitly by package maintainers.
+Set `MCP_KALI_HOME=/path/to/mcp-kali` when running a relocated installation.
+`install-local` intentionally refuses root: system-wide service installation
+and its required dedicated user/systemd unit will be added separately.
 
 Release builds use size optimization, full LTO, one codegen unit, stripped
 symbols, and abort-on-panic behavior. No scheduler, API, dashboard, or MCP
@@ -105,7 +127,7 @@ functionality is removed.
 Start the server on loopback with a workspace-local state directory:
 
 ```bash
-./target/release/mcp-kali-server \
+./target/release/mpc-kali \
   --bind 127.0.0.1:5000 \
   --state-dir ./var/jobs \
   --system-data-dir ./share/mcp-kali \
@@ -123,7 +145,7 @@ Open `http://127.0.0.1:5000/` or `/monitor` for the dashboard. Start the MCP
 bridge beside the MCP host:
 
 ```bash
-./target/release/mcp-kali-client --server http://127.0.0.1:5000
+./target/release/mpc-kali-bridge --server http://127.0.0.1:5000
 ```
 
 For separate machines, keep the server on loopback and create an SSH tunnel:
@@ -141,34 +163,37 @@ Configuration precedence, from lowest to highest, is:
 
 ```text
 hardcoded defaults
--> ~/.envs/.env_mcp-kali (or selected env file)
+-> ~/.mcp-kali/etc/mcp-kali.conf (or selected config file)
 -> existing shell environment
 -> command-line arguments
 ```
 
-Copy the commented example and restrict its permissions:
+`make install-local` creates `~/.mcp-kali/etc/mcp-kali.conf` if it does not
+already exist. The file uses a simple `KEY=VALUE` syntax and must not contain
+secrets. To create the file before installation:
 
 ```bash
-mkdir -p ~/.envs
-cp examples/.env_mcp-kali.example ~/.envs/.env_mcp-kali
-chmod 600 ~/.envs/.env_mcp-kali
+mkdir -p ~/.mcp-kali/etc
+install -m 644 examples/mcp-kali.conf.example ~/.mcp-kali/etc/mcp-kali.conf
 ```
 
-Select another file with `--env-file PATH` or `MCP_KALI_ENV_FILE`. On Unix, both
-binaries warn if the loaded file is accessible by group or other users. Existing
-environment variables are never overwritten by values from the file.
+Select another file with `--config-file PATH` or `MCP_KALI_CONFIG_FILE`.
+Existing environment variables are never overwritten by values from the file.
+Version 2.0 does not read `mcp-kali.env` or `~/.envs/.env_mcp-kali`, and does
+not accept the prior `--env-file` / `MCP_KALI_ENV_FILE` selectors.
 
 | Variable | Binary | Default | Description |
 |---|---|---:|---|
-| `MCP_KALI_ENV_FILE` | Both | `~/.envs/.env_mcp-kali` | Alternate env-file path |
+| `MCP_KALI_HOME` | Both | `~/.mcp-kali` | Root of the self-contained per-user tree |
+| `MCP_KALI_CONFIG_FILE` | Both | `~/.mcp-kali/etc/mcp-kali.conf` | Alternate configuration-file path |
 | `RUST_LOG` | Both | Binary-specific info filter | Tracing filter; logs go to stderr |
 | `MCP_KALI_BIND` | Server | `127.0.0.1:5000` | HTTP API/dashboard bind address |
-| `MCP_KALI_STATE_DIR` | Server | `/var/lib/mcp-kali/jobs` | Private durable job directory |
+| `MCP_KALI_STATE_DIR` | Server | `~/.mcp-kali/var/jobs` | Private durable job directory |
 | `MCP_KALI_MAX_CONCURRENCY` | Server | `2` | Simultaneous jobs, range 1–256 |
 | `MCP_KALI_DEFAULT_TIMEOUT` | Server | `1800` | Default wall timeout, range 1–604800 seconds |
 | `MCP_KALI_REVEAL_SENSITIVE_DATA` | Server | `false` | Show unredacted commands in public records |
-| `MCP_KALI_SYSTEM_DATA_DIR` | Server | Installed `../share/mcp-kali` | Shipped Plugins and base catalog |
-| `MCP_KALI_CONFIG_DIR` | Server | `/etc/mcp-kali` | Administrator Plugin/catalog overlay |
+| `MCP_KALI_SYSTEM_DATA_DIR` | Server | `~/.mcp-kali/share` | Shipped Plugins and base catalog |
+| `MCP_KALI_CONFIG_DIR` | Server | `~/.mcp-kali/etc` | Administrator Plugin/catalog overlay |
 | `MCP_KALI_DISABLE_EXECUTE_COMMAND` | Server | `false` | Remove the privileged free-execution tool |
 | `MCP_KALI_ALLOW_REMOTE_BIND` | Server | `false` | Acknowledge an unauthenticated non-loopback bind |
 | `MCP_KALI_SERVER` | Client | `http://127.0.0.1:5000` | Server origin URL |
@@ -227,7 +252,7 @@ Example configuration:
 {
   "mcpServers": {
     "mcp-kali": {
-      "command": "/absolute/path/to/mcp-kali-client",
+      "command": "/absolute/path/to/mpc-kali-bridge",
       "args": ["--server", "http://127.0.0.1:5000"]
     }
   }
@@ -281,8 +306,8 @@ They are written under `target/completions/`. Direct generation is also
 available through the hidden command:
 
 ```bash
-mcp-kali-server completions zsh > ~/.zfunc/_mcp-kali-server
-mcp-kali-client completions zsh > ~/.zfunc/_mcp-kali-client
+mpc-kali completions zsh > ~/.zfunc/_mpc-kali
+mpc-kali-bridge completions zsh > ~/.zfunc/_mpc-kali-bridge
 ```
 
 Supported shells are Bash, Zsh, Fish, PowerShell, and Elvish. For Zsh, ensure
@@ -354,8 +379,8 @@ development builds.
 
 ## Troubleshooting
 
-- **Permission denied for `/var/lib/mcp-kali/jobs`:** create the directory with
-  ownership for the service account or pass `--state-dir ./var/jobs`.
+- **Cannot write job state:** verify `~/.mcp-kali/var/jobs` is owned by the
+  current user, or pass a writable `--state-dir`.
 - **Remote bind refused:** use loopback plus SSH, or explicitly pass
   `--allow-remote-bind` only after adding network access controls.
 - **Remote HTTP refused by the client:** use HTTPS/SSH; the insecure override is
@@ -382,7 +407,7 @@ development builds.
 - [Support guide](SUPPORT.md)
 - [Code of conduct](CODE_OF_CONDUCT.md)
 - [Publishing and release guide](docs/PUBLISHING.md)
-- [Example environment file](examples/.env_mcp-kali.example)
+- [Example configuration file](examples/mcp-kali.conf.example)
 
 ## License and upstream attribution
 

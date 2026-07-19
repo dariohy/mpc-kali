@@ -251,13 +251,13 @@ impl PluginRegistry {
         registry.load_layer("system", &system_data_dir.join("plugins"), false);
         registry.load_catalog_layer(
             "system",
-            &system_data_dir.join("capability-catalog.yaml"),
+            &system_data_dir.join("plugins/capability-catalog.yaml"),
             &mut catalog,
         );
         registry.load_layer("overlay", &config_dir.join("plugins"), true);
         registry.load_catalog_layer(
             "overlay",
-            &config_dir.join("capability-catalog.yaml"),
+            &config_dir.join("plugins/capability-catalog.yaml"),
             &mut catalog,
         );
         registry.resolve_capabilities(catalog);
@@ -1274,17 +1274,6 @@ async fn read_bounded(mut reader: impl AsyncRead + Unpin) -> std::io::Result<(Ve
         truncated |= read > remaining;
     }
     Ok((bytes, truncated))
-}
-
-pub fn default_system_data_dir() -> PathBuf {
-    env::current_exe()
-        .ok()
-        .and_then(|path| {
-            path.parent()?
-                .parent()
-                .map(|prefix| prefix.join("share/mcp-kali"))
-        })
-        .unwrap_or_else(|| PathBuf::from("/usr/local/share/mcp-kali"))
 }
 
 #[cfg(test)]

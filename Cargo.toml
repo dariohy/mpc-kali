@@ -1,6 +1,6 @@
 [package]
 name = "mcp-kali"
-version = "1.3.0"
+version = "2.0.0"
 edition = "2024"
 rust-version = "1.86"
 description = "Client and server for asynchronous Kali tool scheduling over MCP"
@@ -15,11 +15,11 @@ name = "mcp_kali"
 path = "src/lib.rs"
 
 [[bin]]
-name = "mcp-kali-server"
+name = "mpc-kali"
 path = "src/bin/server.rs"
 
 [[bin]]
-name = "mcp-kali-client"
+name = "mpc-kali-bridge"
 path = "src/bin/client.rs"
 
 [dependencies]

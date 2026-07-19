@@ -1,6 +1,6 @@
 # MCP Kali Plugin authoring
 
-MCP Kali 1.3 discovers declarative YAML Plugins at server startup. Plugin files
+MCP Kali 2.0 discovers declarative YAML Plugins at server startup. Plugin files
 are trusted local configuration, but every definition is validated before it is
 registered. Invalid Plugins are isolated and reported through
 `GET /api/plugins/diagnostics`.
@@ -9,12 +9,14 @@ registered. Invalid Plugins are isolated and reported through
 
 ```text
 SYSTEM_DATA_DIR/
-├── capability-catalog.yaml
-└── plugins/<plugin>/plugin.yaml
+└── plugins/
+    ├── capability-catalog.yaml
+    └── <plugin>/plugin.yaml
 
 CONFIG_DIR/
-├── capability-catalog.yaml
-└── plugins/<plugin>/plugin.yaml
+└── plugins/
+    ├── capability-catalog.yaml
+    └── <plugin>/plugin.yaml
 ```
 
 The packaged system layer loads first. A valid administrator-overlay Plugin
