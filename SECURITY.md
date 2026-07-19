@@ -36,8 +36,12 @@ disclosure.
 - The HTTP server has no built-in authentication or TLS. It defaults to
   loopback, refuses accidental remote binding, and should normally be reached
   through SSH or another protected private transport.
-- Anyone with API access can submit executables available to the server account
-  and read job metadata/output.
+- By default, anyone with API access can invoke the privileged Core Plugin to
+  submit executables available to the server account and read job
+  metadata/output. Disable `execute_command` when free execution is unnecessary.
+- Plugin YAML and the Capability Catalog are trusted local configuration.
+  Protect the packaged data and administrator overlay from unauthorized writes;
+  declarative validation is a safety boundary, not a provenance mechanism.
 - Scanner output is hostile input. The dashboard escapes it, and MCP results
   classify it as untrusted data, but host-agent policy must independently resist
   prompt injection.

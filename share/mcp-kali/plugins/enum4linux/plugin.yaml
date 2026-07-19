@@ -1,0 +1,23 @@
+apiVersion: mcp-kali/v1
+kind: Plugin
+metadata:
+  id: org.mcp-kali.enum4linux
+  name: enum4linux
+  version: 1.0.0
+categories: [information-gathering]
+tags: [smb, windows]
+requires:
+  commands: [enum4linux]
+tools:
+  - metadata:
+      name: enum4linux_enumerate
+      description: Enumerate SMB information from an authorized target.
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [target]
+      properties:
+        target: {type: string, minLength: 1, maxLength: 65536}
+    execution:
+      program: enum4linux
+      args: [-a, "{{target}}"]

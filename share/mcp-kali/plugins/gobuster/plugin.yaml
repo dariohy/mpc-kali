@@ -1,0 +1,26 @@
+apiVersion: mcp-kali/v1
+kind: Plugin
+metadata:
+  id: org.mcp-kali.gobuster
+  name: Gobuster
+  version: 1.0.0
+  description: Declarative Gobuster content discovery.
+categories: [web-application]
+tags: [content-discovery]
+requires:
+  commands: [gobuster]
+tools:
+  - metadata:
+      name: gobuster_content_discovery
+      description: Discover content or virtual hosts on an authorized web target.
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [url, mode, wordlist]
+      properties:
+        url: {type: string, minLength: 1, maxLength: 65536}
+        mode: {type: string, enum: [dir, fuzz, vhost]}
+        wordlist: {type: string, minLength: 1, maxLength: 65536}
+    execution:
+      program: gobuster
+      args: ["{{mode}}", -u, "{{url}}", -w, "{{wordlist}}"]

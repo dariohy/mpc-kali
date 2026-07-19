@@ -1,0 +1,24 @@
+apiVersion: mcp-kali/v1
+kind: Plugin
+metadata:
+  id: org.mcp-kali.dirb
+  name: Dirb
+  version: 1.0.0
+categories: [web-application]
+tags: [content-discovery]
+requires:
+  commands: [dirb]
+tools:
+  - metadata:
+      name: dirb_content_discovery
+      description: Discover web content with Dirb on an authorized target.
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [url, wordlist]
+      properties:
+        url: {type: string, minLength: 1, maxLength: 65536}
+        wordlist: {type: string, minLength: 1, maxLength: 65536}
+    execution:
+      program: dirb
+      args: ["{{url}}", "{{wordlist}}"]

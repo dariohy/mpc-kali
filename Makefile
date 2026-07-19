@@ -1,8 +1,16 @@
-SERVER_BIN := mcp-kali-server
-CLIENT_BIN := mcp-kali-client
+SERVER_BIN := mcp-kali
+CLIENT_BIN := mcp-kali-bridge
 CARGO := cargo
 VERSION := $(shell awk -F '"' '/^version = / { print $$2; exit }' Cargo.toml)
-INSTALL_DIR ?= $(HOME)/.local/bin
+MCP_KALI_HOME ?= $(HOME)/.mcp-kali
+INSTALL_DIR ?= $(MCP_KALI_HOME)/bin
+DATA_DIR ?= $(MCP_KALI_HOME)/share
+CONFIG_DIR ?= $(MCP_KALI_HOME)/etc
+STATE_DIR ?= $(MCP_KALI_HOME)/var/jobs
+PLUGIN_DIR := $(DATA_DIR)/plugins
+OVERLAY_PLUGIN_DIR := $(CONFIG_DIR)/plugins
+CONFIG_FILE := $(CONFIG_DIR)/mcp-kali.conf
+LOCAL_BIN_DIR ?= $(HOME)/.local/bin
 COMPLETION_DIR := target/completions
 SECURITY_DIR := target/security
 
@@ -22,7 +30,7 @@ help:
 	@echo "  run-server    Run a local development server"
 	@echo "  run-client    Run the stdio MCP client"
 	@echo "  completions   Generate completion scripts for both binaries"
-	@echo "  install-local Install both binaries under INSTALL_DIR"
+	@echo "  install-local Create a self-contained per-user installation under ~/.mcp-kali"
 	@echo "  checksum      Generate target/release/SHA256SUMS"
 	@echo "  security      Run audit, dependency policy, and secret scan"
 	@echo "  sbom          Generate a CycloneDX JSON SBOM (cargo-cyclonedx required)"
@@ -52,7 +60,7 @@ release:
 verify: fmt-check check clippy test release
 
 run-server:
-	$(CARGO) run --bin $(SERVER_BIN) -- --state-dir ./var/jobs
+	$(CARGO) run --bin $(SERVER_BIN) -- --state-dir ./var/jobs --system-data-dir ./share/mcp-kali --config-dir ./etc
 
 run-client:
 	$(CARGO) run --bin $(CLIENT_BIN) -- --server http://127.0.0.1:5000
@@ -71,9 +79,26 @@ completions: release
 	target/release/$(CLIENT_BIN) completions elvish > "$(COMPLETION_DIR)/$(CLIENT_BIN).elv"
 
 install-local: release
+	@test "$$(id -u)" -ne 0 || { echo "install-local is for a non-root user; system/service installation is not implemented yet" >&2; exit 2; }
 	mkdir -p "$(INSTALL_DIR)"
+	mkdir -p "$(PLUGIN_DIR)"
+	mkdir -p "$(OVERLAY_PLUGIN_DIR)"
+	mkdir -p "$(STATE_DIR)"
+	mkdir -p "$(LOCAL_BIN_DIR)"
+	@test -e "$(CONFIG_FILE)" || install -m 0644 "examples/mcp-kali.conf.example" "$(CONFIG_FILE)"
 	install -m 0755 "target/release/$(SERVER_BIN)" "$(INSTALL_DIR)/$(SERVER_BIN)"
 	install -m 0755 "target/release/$(CLIENT_BIN)" "$(INSTALL_DIR)/$(CLIENT_BIN)"
+	@for binary in "$(SERVER_BIN)" "$(CLIENT_BIN)"; do \
+		link="$(LOCAL_BIN_DIR)/$$binary"; \
+		if [ -e "$$link" ] && [ ! -L "$$link" ]; then \
+			echo "refusing to replace non-symlink $$link" >&2; exit 2; \
+		fi; \
+	done; \
+	for binary in "$(SERVER_BIN)" "$(CLIENT_BIN)"; do \
+		link="$(LOCAL_BIN_DIR)/$$binary"; \
+		ln -sfn "$(abspath $(INSTALL_DIR))/$$binary" "$$link"; \
+	done
+	cp -R share/mcp-kali/plugins/. "$(PLUGIN_DIR)/"
 
 checksum: release
 	cd target/release && shasum -a 256 "$(SERVER_BIN)" "$(CLIENT_BIN)" > SHA256SUMS

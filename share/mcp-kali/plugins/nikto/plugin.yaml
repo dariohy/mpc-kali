@@ -1,0 +1,22 @@
+apiVersion: mcp-kali/v1
+kind: Plugin
+metadata:
+  id: org.mcp-kali.nikto
+  name: Nikto
+  version: 1.0.0
+categories: [vulnerability-analysis, web-application]
+requires:
+  commands: [nikto]
+tools:
+  - metadata:
+      name: nikto_web_scan
+      description: Run a Nikto assessment against an authorized web target.
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [target]
+      properties:
+        target: {type: string, minLength: 1, maxLength: 65536}
+    execution:
+      program: nikto
+      args: [-h, "{{target}}"]

@@ -29,6 +29,10 @@ make verify
 - Keep `Cargo.toml` as the only version source of truth.
 - Keep MCP JSON-RPC on stdout and all diagnostics on stderr.
 - Preserve structured process execution; do not add shell invocation.
+- Keep utility-specific command syntax in declarative Plugins, not Rust. Preserve
+  whole-value templates, reserved built-in identities, and startup diagnostics.
+- Keep the server registry as the MCP tool source of truth; the stdio bridge
+  must remain tool-agnostic.
 - Treat command fields, output, API responses, and webhook fields as untrusted.
 - Preserve default command redaction and explicit reveal behavior.
 - Add bounded input/resource handling for new parsers and endpoints.

@@ -5,10 +5,51 @@ All notable changes to MCP Kali are documented here. The project follows
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-07-18
+
+### Added
+
+- Declarative YAML Plugin discovery with layered packaged and administrator
+  data, JSON Schema validation, safe argv templates, diagnostics, and dynamic
+  MCP tool projection.
+- Built-in Core Plugin for privileged argv execution and bounded local command
+  exploration, plus a built-in job-management Plugin.
+- Separate Capability Catalog endpoints with provider availability resolution.
+- Packaged declarative definitions for Nmap, Gobuster, Dirb, Nikto, SQLmap,
+  Hydra, John the Ripper, WPScan, and enum4linux.
+- Monitor Tools view for registered Plugins/tools, declared command
+  requirements, and isolated unavailable-Plugin diagnostics.
+- MCP tool-list change notifications, so capable hosts can refresh their tool
+  index after the server's Plugin projection changes.
+
 ### Changed
 
+- Restore the public binary names to `mcp-kali` and `mcp-kali-bridge`; the
+  brief `mpc-*` spelling was erroneous.
+- `make install-local` now creates a self-contained non-root user installation
+  under `~/.mcp-kali` with `bin`, `etc`, `share/plugins`, and `var/jobs`.
+- User installation creates or updates safe `~/.local/bin` symlinks for both
+  MCP Kali binaries.
+- Replaced the per-user `.env` contract with a non-secret `mcp-kali.conf`
+  configuration file and the canonical `--config-file` / `MCP_KALI_CONFIG_FILE`
+  selectors.
+- Moved the shipped Capability Catalog into the Plugin data directory and made
+  per-user paths the runtime defaults.
+- Set the release version to 2.0.0.
+- Replaced hard-coded scanner and command submission routes with generic Plugin
+  discovery and `POST /api/tools/{tool_name}/invoke`.
+- Made the MCP bridge retrieve tool definitions from the server at `tools/list`.
+- Extended local installation to place packaged runtime data in the
+  self-contained `~/.mcp-kali/share/plugins` tree.
 - Renamed the public repository from `dariohy/mpc-kali` to
   `dariohy/mcp-kali` and updated canonical project links.
+
+### Removed
+
+- Legacy `--env-file`, `MCP_KALI_ENV_FILE`, `mcp-kali.env`, and
+  `~/.envs/.env_mcp-kali` configuration support.
+- Erroneous `mpc-kali` and `mpc-kali-bridge` binary names; use `mcp-kali` and
+  `mcp-kali-bridge` instead.
 
 ## [1.1.0] - 2026-07-18
 
@@ -96,6 +137,7 @@ All notable changes to MCP Kali are documented here. The project follows
 - There is no automatic job-retention policy; operators must manage the private
   state directory according to their evidence-retention requirements.
 
-[Unreleased]: https://github.com/dariohy/mcp-kali/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/dariohy/mcp-kali/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/dariohy/mcp-kali/releases/tag/v2.0.0
 [1.1.0]: https://github.com/dariohy/mcp-kali/releases/tag/v1.1.0
 [1.0.0]: https://github.com/dariohy/mcp-kali/releases/tag/v1.0.0

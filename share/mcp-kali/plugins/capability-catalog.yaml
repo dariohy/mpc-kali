@@ -1,0 +1,55 @@
+apiVersion: mcp-kali/v1
+kind: CapabilityCatalog
+version: 1
+
+capabilities:
+  - id: system.command_execution
+    description: Execute a local program with an explicit argument vector.
+    providers:
+      - plugin: mcp-kali.core
+        tools: [execute_command]
+  - id: system.command_exploration
+    description: Inspect an installed binary and its local documentation.
+    providers:
+      - plugin: mcp-kali.core
+        tools: [explore_command]
+  - id: system.job_management
+    description: Inspect and control asynchronous MCP Kali jobs.
+    providers:
+      - plugin: mcp-kali.jobs
+  - id: network.host_discovery
+    description: Discover responsive hosts or addresses.
+    providers:
+      - plugin: org.mcp-kali.nmap
+        tools: [nmap_host_discovery]
+  - id: network.service_detection
+    description: Identify services and versions exposed by a target.
+    providers:
+      - plugin: org.mcp-kali.nmap
+        tools: [nmap_service_scan]
+  - id: web.content_discovery
+    description: Discover web content, paths, or virtual hosts.
+    providers:
+      - plugin: org.mcp-kali.gobuster
+      - plugin: org.mcp-kali.dirb
+  - id: web.vulnerability_analysis
+    description: Assess a web application for known weaknesses.
+    providers:
+      - plugin: org.mcp-kali.nikto
+      - plugin: org.mcp-kali.wpscan
+  - id: web.injection_testing
+    description: Test web inputs for SQL injection behavior.
+    providers:
+      - plugin: org.mcp-kali.sqlmap
+  - id: credential.authentication_testing
+    description: Test authorized credentials against a network service.
+    providers:
+      - plugin: org.mcp-kali.hydra
+  - id: credential.password_cracking
+    description: Test password hashes against an authorized wordlist.
+    providers:
+      - plugin: org.mcp-kali.john
+  - id: network.smb_enumeration
+    description: Enumerate SMB and Windows network information.
+    providers:
+      - plugin: org.mcp-kali.enum4linux

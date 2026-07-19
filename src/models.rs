@@ -1,6 +1,5 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -59,12 +58,6 @@ pub struct SubmitJob {
     pub timeout_seconds: Option<u64>,
     #[serde(default)]
     pub webhook_url: Option<String>,
-}
-
-#[derive(Deserialize)]
-pub struct ToolRequest {
-    #[serde(flatten)]
-    pub values: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Serialize)]

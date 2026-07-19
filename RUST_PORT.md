@@ -1,8 +1,28 @@
-# MCP Kali 1.0.0 architecture and Rust migration notes
+# MCP Kali architecture and Rust migration notes
 
 This document records why the Rust design differs from the earlier Python MCP
 Kali Server and describes the implementation boundaries that maintainers must
 preserve. User-facing instructions are in [docs/USER_MANUAL.md](docs/USER_MANUAL.md).
+
+## Version 2.0 Plugin runtime
+
+Version 2.0 moves utility-specific knowledge out of Rust and into declarative
+YAML Plugins. At startup the server registers the built-in `mcp-kali.core` and
+`mcp-kali.jobs` Plugins, loads packaged definitions, overlays administrator
+definitions, validates JSON Schemas and safe argv templates, then resolves the
+separate Capability Catalog. The MCP bridge retrieves `/api/tools`; it no
+longer contains a scanner catalogue or scanner-specific routing.
+
+The scheduler remains the execution boundary. A declarative invocation renders
+one literal program plus one argument per template value and submits the result
+through the same persistence, concurrency, process-group, timeout, output, and
+webhook machinery. Shell interpreters, partial interpolation, and expression
+evaluation are rejected from declarative definitions.
+
+Plugin load failures are isolated and public through diagnostics. A valid
+administrator overlay replaces matching packaged Plugin/tool identities.
+Discovery is startup-only in 2.0; hot reload and executable extension ABIs are
+out of scope.
 
 ## Motivation
 
@@ -14,7 +34,7 @@ request until completion and had no durable identity or lifecycle controls.
 Version 1.0.0 separates submission, execution, monitoring, and MCP transport:
 
 ```text
-MCP host -> mcp-kali-client -> HTTP(S) -> mcp-kali-server
+MCP host -> mcp-kali-bridge -> HTTP(S) -> mcp-kali
                                              |
                        +---------------------+---------------------+
                        |                     |                     |
@@ -30,13 +50,14 @@ MCP host -> mcp-kali-client -> HTTP(S) -> mcp-kali-server
 ```text
 src/bin/client.rs  CLI/config bootstrap for the stdio MCP client
 src/bin/server.rs  CLI/config bootstrap for the scheduler/API server
-src/config.rs      shared env-file selection and permission checks
-src/mcp.rs         MCP JSON-RPC transport, tool catalogue, typed API forwarding
+src/config.rs      shared configuration-file selection and defaults
+src/mcp.rs         MCP JSON-RPC transport and dynamic API forwarding
 src/api.rs         Axum routes, validation adapters, dashboard response headers
 src/jobs.rs        durable scheduler, process groups, output files, webhooks
-src/commands.rs    supported scanner-to-argv construction and validation
+src/plugins.rs     Plugin registry, catalogs, schemas, templates, core operations
 src/models.rs      stable serialized job, output, and health models
 src/dashboard.html embedded dashboard HTML/CSS/JavaScript
+share/mcp-kali/    packaged Plugin manifests and base Capability Catalog
 ```
 
 `Cargo.toml` is the version source of truth. Both Clap binaries, MCP
@@ -48,7 +69,7 @@ src/dashboard.html embedded dashboard HTML/CSS/JavaScript
 scheduler calls `tokio::process::Command::new(argv[0]).args(argv[1..])`. It does
 not invoke a shell.
 
-The `/api/command` and MCP `execute_command` compatibility shapes perform
+Through version 1.1, `/api/command` and the old MCP `execute_command` shape performed
 shell-style lexical splitting only. Pipes, redirection, substitution, and
 separators remain literal arguments. New integrations should use argv directly.
 
@@ -173,18 +194,18 @@ with their environment.
 
 ## Configuration model
 
-Both binaries load `~/.envs/.env_mcp-kali` before Clap parsing. An explicit
-`--env-file` or `MCP_KALI_ENV_FILE` selects another file. Dotenv values do not
-override the pre-existing shell environment; CLI flags override environment
-values. Broad Unix env-file permissions produce a warning without printing any
-value.
+Both binaries load `~/.mcp-kali/etc/mcp-kali.conf` before Clap parsing.
+`MCP_KALI_HOME` relocates the complete per-user tree; an explicit
+`--config-file` or `MCP_KALI_CONFIG_FILE` selects another file. The `KEY=VALUE`
+configuration file is non-secret: credentials, passwords, and tokens do not
+belong there. Dotenv values do not override the pre-existing shell environment;
+CLI flags override configuration values.
 
 ## API summary
 
 ```text
 GET  / and /monitor
 GET  /health
-POST /api/jobs
 GET  /api/jobs
 GET  /api/jobs/{id}
 GET  /api/jobs/{id}/output
@@ -194,12 +215,18 @@ POST /api/jobs/{id}/cancel
 POST /api/jobs/{id}/pause
 POST /api/jobs/{id}/resume
 POST /api/jobs/{id}/kill
-POST /api/tools/{tool}
-POST /api/command
+GET  /api/plugins
+GET  /api/plugins/{plugin_id}
+GET  /api/plugins/diagnostics
+GET  /api/capabilities
+GET  /api/capabilities/{capability_id}/tools
+GET  /api/tools
+POST /api/tools/{tool_name}/invoke
 ```
 
-Submission returns `202 Accepted`. State conflicts return `409`. Public job
-records never serialize private argv.
+Scheduled invocation returns `202 Accepted`; synchronous runtime operations
+return `200`. State conflicts return `409`. Public job records never serialize
+private argv.
 
 ## Release engineering
 
@@ -212,7 +239,7 @@ Version 1.0.0 adds:
 - `make verify`, `security`, `checksum`, `sbom`, and `completions`;
 - `deny.toml` dependency policy;
 - ignored generated security/completion artifacts; and
-- an env-file example plus complete operations manual.
+- a non-secret configuration-file example plus complete operations manual.
 
 ## Known limitations and future work
 

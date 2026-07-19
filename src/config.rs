@@ -1,52 +1,52 @@
 use anyhow::{Context, Result, bail};
-use std::{
-    env,
-    ffi::OsString,
-    path::{Path, PathBuf},
-};
+use std::{env, ffi::OsString, path::PathBuf};
 
-const ENV_FILE_VARIABLE: &str = "MCP_KALI_ENV_FILE";
+const CONFIG_FILE_VARIABLE: &str = "MCP_KALI_CONFIG_FILE";
+const HOME_VARIABLE: &str = "MCP_KALI_HOME";
 
-/// Loads the shared MCP Kali env file before Clap resolves environment-backed
-/// options. Existing shell variables win because dotenv does not overwrite
-/// them; explicit CLI arguments are parsed afterwards and win over both.
-pub fn load_env_file() -> Result<Option<PathBuf>> {
-    let cli_path = env_file_from_args(env::args_os())?;
-    let environment_path = env::var_os(ENV_FILE_VARIABLE).map(PathBuf::from);
+/// Loads the shared MCP Kali configuration file before Clap resolves
+/// environment-backed options. The file uses a simple `KEY=VALUE` format so
+/// its values can provide normal CLI defaults. Existing shell variables win
+/// because dotenv does not overwrite them; explicit CLI arguments win over both.
+pub fn load_config_file() -> Result<Option<PathBuf>> {
+    let cli_path = config_file_from_args(env::args_os())?;
+    let environment_path = env::var_os(CONFIG_FILE_VARIABLE).map(PathBuf::from);
     let explicit = cli_path.is_some() || environment_path.is_some();
-    let path = cli_path.or(environment_path).or_else(default_env_file);
+    let path = cli_path.or(environment_path).or_else(default_config_file);
 
     let Some(path) = path.map(expand_home) else {
         return Ok(None);
     };
     if !path.exists() {
         if explicit {
-            bail!("environment file does not exist: {}", path.display());
+            bail!("configuration file does not exist: {}", path.display());
         }
         return Ok(None);
     }
     if !path.is_file() {
-        bail!("environment file is not a regular file: {}", path.display());
+        bail!(
+            "configuration file is not a regular file: {}",
+            path.display()
+        );
     }
-    warn_if_permissions_are_broad(&path)?;
     dotenvy::from_path(&path)
-        .with_context(|| format!("load environment file {}", path.display()))?;
+        .with_context(|| format!("load configuration file {}", path.display()))?;
     Ok(Some(path))
 }
 
-fn env_file_from_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<PathBuf>> {
+fn config_file_from_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<PathBuf>> {
     let mut args = args.into_iter().skip(1);
     while let Some(argument) = args.next() {
-        if argument == "--env-file" {
-            let value = args.next().context("--env-file requires a path")?;
+        if argument == "--config-file" {
+            let value = args.next().context("--config-file requires a path")?;
             return Ok(Some(PathBuf::from(value)));
         }
-        if let Some(value) = argument
+        let value = argument
             .to_str()
-            .and_then(|value| value.strip_prefix("--env-file="))
-        {
+            .and_then(|value| value.strip_prefix("--config-file="));
+        if let Some(value) = value {
             if value.is_empty() {
-                bail!("--env-file requires a path");
+                bail!("--config-file requires a path");
             }
             return Ok(Some(PathBuf::from(value)));
         }
@@ -54,10 +54,40 @@ fn env_file_from_args(args: impl IntoIterator<Item = OsString>) -> Result<Option
     Ok(None)
 }
 
-fn default_env_file() -> Option<PathBuf> {
-    env::var_os("HOME")
+/// Returns the self-contained per-user MCP Kali directory. `MCP_KALI_HOME`
+/// makes a relocated user installation explicit without changing individual
+/// state, configuration, or data paths.
+pub fn default_mcp_kali_home() -> Option<PathBuf> {
+    env::var_os(HOME_VARIABLE)
         .map(PathBuf::from)
-        .map(|home| home.join(".envs/.env_mcp-kali"))
+        .map(expand_home)
+        .or_else(|| {
+            env::var_os("HOME")
+                .map(PathBuf::from)
+                .map(|home| home.join(".mcp-kali"))
+        })
+}
+
+pub fn default_state_dir() -> PathBuf {
+    default_mcp_kali_home()
+        .map(|home| home.join("var/jobs"))
+        .unwrap_or_else(|| PathBuf::from("/var/lib/mcp-kali/jobs"))
+}
+
+pub fn default_system_data_dir() -> PathBuf {
+    default_mcp_kali_home()
+        .map(|home| home.join("share"))
+        .unwrap_or_else(|| PathBuf::from("/usr/local/share/mcp-kali"))
+}
+
+pub fn default_config_dir() -> PathBuf {
+    default_mcp_kali_home()
+        .map(|home| home.join("etc"))
+        .unwrap_or_else(|| PathBuf::from("/etc/mcp-kali"))
+}
+
+fn default_config_file() -> Option<PathBuf> {
+    default_mcp_kali_home().map(|home| home.join("etc/mcp-kali.conf"))
 }
 
 fn expand_home(path: PathBuf) -> PathBuf {
@@ -73,35 +103,22 @@ fn expand_home(path: PathBuf) -> PathBuf {
     path
 }
 
-#[cfg(unix)]
-fn warn_if_permissions_are_broad(path: &Path) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    let mode = std::fs::metadata(path)?.permissions().mode();
-    if mode & 0o077 != 0 {
-        eprintln!(
-            "warning: environment file {} is accessible by group or other users; use chmod 600",
-            path.display()
-        );
-    }
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn warn_if_permissions_are_broad(_path: &Path) -> Result<()> {
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn extracts_both_env_file_forms() {
-        let split = env_file_from_args(["binary".into(), "--env-file".into(), "/tmp/a.env".into()])
-            .unwrap();
-        assert_eq!(split, Some(PathBuf::from("/tmp/a.env")));
+    fn extracts_config_file_forms() {
+        let split = config_file_from_args([
+            "binary".into(),
+            "--config-file".into(),
+            "/tmp/a.conf".into(),
+        ])
+        .unwrap();
+        assert_eq!(split, Some(PathBuf::from("/tmp/a.conf")));
 
-        let joined = env_file_from_args(["binary".into(), "--env-file=/tmp/b.env".into()]).unwrap();
-        assert_eq!(joined, Some(PathBuf::from("/tmp/b.env")));
+        let joined =
+            config_file_from_args(["binary".into(), "--config-file=/tmp/b.conf".into()]).unwrap();
+        assert_eq!(joined, Some(PathBuf::from("/tmp/b.conf")));
     }
 }

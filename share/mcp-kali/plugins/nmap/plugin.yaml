@@ -1,0 +1,45 @@
+apiVersion: mcp-kali/v1
+kind: Plugin
+metadata:
+  id: org.mcp-kali.nmap
+  name: Nmap
+  version: 1.0.0
+  description: Declarative Nmap host and service discovery.
+categories: [information-gathering]
+tags: [network, discovery]
+requires:
+  commands: [nmap]
+tools:
+  - metadata:
+      name: nmap_host_discovery
+      description: Discover responsive systems in an authorized target range.
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [target]
+      properties:
+        target: {type: string, minLength: 1, maxLength: 65536}
+    execution:
+      program: nmap
+      args: [-sn, "{{target}}"]
+  - metadata:
+      name: nmap_service_scan
+      description: Detect services and versions on an authorized target.
+      categories: [information-gathering]
+      tags: [services]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [target]
+      properties:
+        target: {type: string, minLength: 1, maxLength: 65536}
+        ports: {type: string, minLength: 1, maxLength: 65536}
+    execution:
+      program: nmap
+      args:
+        - -sV
+        - when: ports
+          args: [-p, "{{ports}}"]
+        - "{{target}}"
+    policy:
+      timeout_seconds: 1800

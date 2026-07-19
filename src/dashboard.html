@@ -34,17 +34,25 @@
     code.full-command { margin-top:5px; white-space:pre-wrap; overflow:visible; text-overflow:clip; overflow-wrap:anywhere; max-height:160px; }
     .output-title { margin:0 0 5px; color:#9aabb6; font-size:12px; } .output-title a { color:#9fd5ff; text-decoration:none; margin-left:8px; } .output-title a:hover { text-decoration:underline; } .output-warning { margin:0 0 8px; color:#ffd166; font-size:12px; } .empty { padding:32px; text-align:center; color:#9aabb6; }
     #notice { min-height:20px; color:#ffb4b4; } .refresh { color:#9aabb6; font-size:12px; }
+    a.runtime-link { color:#9fd5ff; text-decoration:none; } a.runtime-link:hover { text-decoration:underline; }
+    .runtime-summary { margin:15px 0; color:#9aabb6; } .runtime-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:10px; }
+    .runtime-card { border:1px solid #293942; border-radius:8px; background:#10191f; padding:12px; } .runtime-card h2 { margin:0; font-size:16px; }
+    .runtime-card p { margin:7px 0; } .runtime-card code { display:inline; white-space:normal; overflow-wrap:anywhere; }
+    .runtime-status { font-weight:700; font-size:11px; letter-spacing:.04em; text-transform:uppercase; } .available { color:#74e6aa; } .unavailable { color:#ff9292; }
+    .tool-list { margin:8px 0 0; padding-left:18px; } .tool-list li { margin:5px 0; } .tool-description { color:#9aabb6; }
+    .diagnostics { margin-top:18px; } .diagnostic-card { border-color:#653b42; background:#24171c; } .diagnostic-card h2 { color:#ffb4b4; }
     @media (max-width: 850px) { .row { grid-template-columns: 34px 82px minmax(80px,1fr) auto; } .command,.elapsed { display:none; } .detail { grid-template-columns:1fr; } }
   </style>
 </head>
 <body>
   <header>
-    <div><h1>MCP Kali job control</h1><div class="muted">Live scheduler monitor and control plane</div></div>
+    <div><h1>MCP Kali job control</h1><div class="muted">Live scheduler monitor and declarative Plugin runtime · <a class="runtime-link" href="/api/plugins">Plugins</a> · <a class="runtime-link" href="/api/capabilities">Capabilities</a> · <a class="runtime-link" href="/api/plugins/diagnostics">Diagnostics</a></div></div>
     <div class="stats" id="stats"></div>
   </header>
   <div class="tabs">
     <button class="tab active" data-tab="active">Active &amp; queue</button>
     <button class="tab" data-tab="history">Finished history</button>
+    <button class="tab" data-tab="tools">Tools</button>
     <button class="secondary" onclick="load()">Refresh now</button>
     <button class="secondary" id="auto-refresh" onclick="toggleAutoRefresh()">Start auto-refresh</button>
     <span class="refresh" id="refresh"></span>
@@ -52,12 +60,14 @@
   <p id="notice"></p>
   <section class="panel active" id="active"></section>
   <section class="panel" id="history"></section>
+  <section class="panel" id="tools"></section>
 <script>
   const activeStates = new Set(['queued','running','paused']);
-  let jobs = [], currentTab = 'active', autoRefreshEnabled = false, autoRefreshTimer = null, lastUpdated = null, loading = false, listSignature = null;
+  let jobs = [], runtime = {plugins:0,tools:0,diagnostics:0}, plugins = [], toolDefinitions = [], diagnostics = [], currentTab = 'active', autoRefreshEnabled = false, autoRefreshTimer = null, lastUpdated = null, loading = false, listSignature = null;
   const expandedJobs = new Set();
   const activePanel = document.getElementById('active');
   const historyPanel = document.getElementById('history');
+  const toolsPanel = document.getElementById('tools');
   const statsEl = document.getElementById('stats');
   const refreshEl = document.getElementById('refresh');
   const noticeEl = document.getElementById('notice');
@@ -92,18 +102,35 @@
     const updated = lastUpdated ? ` · Updated ${lastUpdated.toLocaleTimeString()}` : '';
     refreshEl.textContent = `${autoRefreshEnabled ? 'Auto-refreshing every 5 seconds' : 'Auto-refresh stopped'}${updated}`;
   }
+  function values(values) { return Array.isArray(values) && values.length ? values.map(esc).join(', ') : 'None'; }
+  function renderTools() {
+    const byPlugin = new Map();
+    for (const tool of toolDefinitions) {
+      const pluginId = tool._meta?.plugin_id || 'unknown';
+      if (!byPlugin.has(pluginId)) byPlugin.set(pluginId, []);
+      byPlugin.get(pluginId).push(tool);
+    }
+    const available = plugins.map(plugin => {
+      const tools = byPlugin.get(plugin.id) || [];
+      const requirements = plugin.requirements?.commands || [];
+      return `<article class="runtime-card"><div><span class="runtime-status available">Available</span> <h2>${esc(plugin.name)} <span class="muted">${esc(plugin.version)}</span></h2></div><p><code>${esc(plugin.id)}</code> · ${esc(plugin.source)}</p><p>${esc(plugin.description || 'No description.')}</p><p><b>Required commands:</b> ${values(requirements)}</p><p><b>Registered tools (${tools.length}):</b></p><ul class="tool-list">${tools.map(tool => `<li><code>${esc(tool.name)}</code> <span class="tool-description">${esc(tool.description)}</span></li>`).join('') || '<li class="muted">No tools registered.</li>'}</ul></article>`;
+    }).join('') || '<div class="empty">No Plugins are registered.</div>';
+    const unavailable = diagnostics.map(diagnostic => `<article class="runtime-card diagnostic-card"><span class="runtime-status unavailable">Unavailable</span><h2>${esc(diagnostic.plugin_id || diagnostic.tool_name || 'Plugin definition')}</h2><p><b>Layer:</b> ${esc(diagnostic.layer)} · <code>${esc(diagnostic.path)}</code></p><p>${esc(diagnostic.message)}</p></article>`).join('') || '<div class="empty">No Plugin diagnostics. All discovered definitions are available.</div>';
+    toolsPanel.innerHTML = `<p class="runtime-summary">Tools are discovered at server startup. If a Plugin requires an executable that is absent from the server PATH, that Plugin is not published to MCP; the server and other Plugins continue running.</p><div class="runtime-grid">${available}</div><div class="diagnostics"><h2>Unavailable definitions and diagnostics (${diagnostics.length})</h2><div class="runtime-grid">${unavailable}</div></div>`;
+  }
   function render() {
     const activeJobs = jobs.filter(j => activeStates.has(j.state));
     const queued = activeJobs.filter(j => j.state === 'queued').sort((a,b) => new Date(a.created_at)-new Date(b.created_at));
     const activeNow = activeJobs.filter(j => j.state !== 'queued').sort((a,b) => new Date(a.created_at)-new Date(b.created_at));
     const finished = jobs.filter(j => !activeStates.has(j.state)).sort((a,b) => new Date(b.finished_at || b.created_at)-new Date(a.finished_at || a.created_at));
-    statsEl.innerHTML = `<span class="stat">Running <b>${activeNow.filter(j=>j.state==='running').length}</b></span><span class="stat">Paused <b>${activeNow.filter(j=>j.state==='paused').length}</b></span><span class="stat">Queued <b>${queued.length}</b></span><span class="stat">Finished <b>${finished.length}</b></span>`;
+    statsEl.innerHTML = `<span class="stat">Plugins <b>${runtime.plugins}</b></span><span class="stat">Tools <b>${runtime.tools}</b></span><span class="stat">Diagnostics <b>${runtime.diagnostics}</b></span><span class="stat">Running <b>${activeNow.filter(j=>j.state==='running').length}</b></span><span class="stat">Paused <b>${activeNow.filter(j=>j.state==='paused').length}</b></span><span class="stat">Queued <b>${queued.length}</b></span><span class="stat">Finished <b>${finished.length}</b></span>`;
     const signature = JSON.stringify([...activeNow, ...queued, ...finished].map(job => [job.id, job.state, job.tool, job.command]));
     if (signature !== listSignature) {
       activePanel.innerHTML = `<p class="summary">Running and paused jobs first; queued jobs follow in their dispatch order. Pause does not stop the configured wall-clock timeout.</p>${[...activeNow,...queued].map(j => jobCard(j, j.state === 'queued' ? queued.indexOf(j)+1 : '')).join('') || '<div class="empty">No active or queued jobs.</div>'}`;
       historyPanel.innerHTML = `<p class="summary">Completed, failed, cancelled, timed-out, and interrupted jobs. Newest first.</p>${finished.map(j => jobCard(j, '')).join('') || '<div class="empty">No completed jobs yet.</div>'}`;
       listSignature = signature;
     }
+    renderTools();
     refreshElapsed();
     for (const id of expandedJobs) detailsFor(id);
   }
@@ -116,8 +143,8 @@
   async function load() {
     if (loading) return;
     loading = true;
-    try { const response = await fetch('/api/jobs'); if (!response.ok) throw new Error(await response.text()); jobs = (await response.json()).jobs; render(); lastUpdated = new Date(); refreshStatus(); noticeEl.textContent = ''; }
-    catch (error) { noticeEl.textContent = `Could not refresh jobs: ${error.message}`; }
+    try { const responses = await Promise.all([fetch('/api/jobs'),fetch('/api/plugins'),fetch('/api/tools'),fetch('/api/plugins/diagnostics')]); for (const response of responses) if (!response.ok) throw new Error(await response.text()); const [jobsPayload, pluginsPayload, toolsPayload, diagnosticsPayload] = await Promise.all(responses.map(response => response.json())); jobs = jobsPayload.jobs || []; plugins = pluginsPayload.plugins || []; toolDefinitions = toolsPayload.tools || []; diagnostics = diagnosticsPayload.diagnostics || []; runtime = {plugins:plugins.length,tools:toolDefinitions.length,diagnostics:diagnostics.length}; render(); lastUpdated = new Date(); refreshStatus(); noticeEl.textContent = ''; }
+    catch (error) { noticeEl.textContent = `Could not refresh Monitor data: ${error.message}`; }
     finally { loading = false; }
   }
   async function act(id, action) { if (action === 'kill' && !confirm('Force-kill this job and its subprocesses?')) return; try { const response = await fetch(`/api/jobs/${id}/${action}`, {method:'POST'}); if (!response.ok) throw new Error((await response.json()).error || response.statusText); await load(); } catch (error) { noticeEl.textContent = `${action} failed: ${error.message}`; } }

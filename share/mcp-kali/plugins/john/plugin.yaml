@@ -1,0 +1,36 @@
+apiVersion: mcp-kali/v1
+kind: Plugin
+metadata:
+  id: org.mcp-kali.john
+  name: John the Ripper
+  version: 1.0.0
+categories: [password-attacks]
+requires:
+  commands: [john]
+tools:
+  - metadata:
+      name: john_password_crack
+      description: Test authorized password hashes against a wordlist.
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [hash_file, wordlist_arg]
+      properties:
+        hash_file: {type: string, minLength: 1, maxLength: 65536}
+        wordlist_arg:
+          type: string
+          pattern: '^--wordlist=[^\r\n]+$'
+          maxLength: 65536
+          description: Complete John wordlist option, for example --wordlist=/path/to/list.
+        format_arg:
+          type: string
+          pattern: '^--format=[A-Za-z0-9_.+-]+$'
+          maxLength: 256
+          description: Complete optional John format argument, for example --format=raw-md5.
+    execution:
+      program: john
+      args:
+        - when: format_arg
+          args: ["{{format_arg}}"]
+        - "{{wordlist_arg}}"
+        - "{{hash_file}}"

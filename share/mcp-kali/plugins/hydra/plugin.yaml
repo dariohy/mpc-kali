@@ -1,0 +1,45 @@
+apiVersion: mcp-kali/v1
+kind: Plugin
+metadata:
+  id: org.mcp-kali.hydra
+  name: Hydra
+  version: 1.0.0
+categories: [password-attacks]
+tags: [authentication]
+requires:
+  commands: [hydra]
+tools:
+  - metadata:
+      name: hydra_authentication_test
+      description: Test authorized credentials against a network service.
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [target, service]
+      properties:
+        target: {type: string, minLength: 1, maxLength: 65536}
+        service: {type: string, minLength: 1, maxLength: 65536}
+        username: {type: string, minLength: 1, maxLength: 65536}
+        username_file: {type: string, minLength: 1, maxLength: 65536}
+        password: {type: string, minLength: 1, maxLength: 65536}
+        password_file: {type: string, minLength: 1, maxLength: 65536}
+      oneOf:
+        - required: [username, password]
+        - required: [username, password_file]
+        - required: [username_file, password]
+        - required: [username_file, password_file]
+    execution:
+      program: hydra
+      args:
+        - -t
+        - "4"
+        - when: username
+          args: [-l, "{{username}}"]
+        - when: username_file
+          args: [-L, "{{username_file}}"]
+        - when: password
+          args: [-p, "{{password}}"]
+        - when: password_file
+          args: [-P, "{{password_file}}"]
+        - "{{target}}"
+        - "{{service}}"

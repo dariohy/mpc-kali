@@ -5,9 +5,8 @@ public from creating a software release.
 
 ## Current release model
 
-- `main` and tag `v1.1.0` identify the current stable release.
-- Tags `v1.0.0` and `v1.1.0` are immutable. Do not move or recreate them.
-- Branch `1.1.0` is retained as the release branch for version 1.1.0.
+- `main` and tag `v2.0.0` identify the current stable release.
+- Release tags are immutable. Do not move or recreate them.
 - Create or announce a new development branch before beginning the next release
   line.
 - Keep completed development changes under `CHANGELOG.md` → `Unreleased`.

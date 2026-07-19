@@ -1,4 +1,4 @@
-# MCP Kali 1.1.0
+# MCP Kali 2.0.0
 
 [![CI](https://github.com/dariohy/mcp-kali/actions/workflows/ci.yml/badge.svg)](https://github.com/dariohy/mcp-kali/actions/workflows/ci.yml)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
@@ -11,9 +11,7 @@ to an MCP host and returns job IDs immediately.
 
 Use MCP Kali only on systems and targets you are explicitly authorized to test.
 
-**Project status:** `v1.1.0` is the current stable release. The immutable
-[`v1.0.0`](https://github.com/dariohy/mcp-kali/tree/v1.0.0) tag remains
-available as the first public release line.
+**Project status:** `v2.0.0` is the current stable release.
 
 ## Contents
 
@@ -22,6 +20,7 @@ available as the first public release line.
 - [Build and install](#build-and-install)
 - [Quick start](#quick-start)
 - [Configuration](#configuration)
+- [Plugins and capabilities](#plugins-and-capabilities)
 - [MCP host setup](#mcp-host-setup)
 - [Dashboard and jobs](#dashboard-and-jobs)
 - [Shell completions](#shell-completions)
@@ -35,18 +34,19 @@ available as the first public release line.
 ## Architecture
 
 ```text
-MCP host -> mcp-kali-client -> HTTP(S) -> mcp-kali-server -> durable queue
+MCP host -> mcp-kali-bridge -> HTTP(S) -> mcp-kali -> Plugin Registry
+                                                           -> durable queue
                                                            -> bounded workers
-                                                           -> job files
-                                                           -> dashboard/API
-                                                           -> webhook
+                                                           -> job files/API
 ```
 
-- `mcp-kali-server` runs on the Kali host and executes tools.
-- `mcp-kali-client` runs beside the MCP host and speaks newline-delimited MCP
+- `mcp-kali` runs on the Kali host and executes tools.
+- `mcp-kali-bridge` runs beside the MCP host and speaks newline-delimited MCP
   JSON-RPC over stdin/stdout. It never executes Kali tools locally.
 - Every submission returns a UUID job ID. Agents can do other work and inspect
   the job later rather than repeatedly blocking on a command.
+- The server discovers declarative YAML Plugins and publishes their MCP tools
+  dynamically. Adding a valid local Plugin does not require recompilation.
 
 The Rust implementation originated as a port of
 [MCP-Kali-Server](https://github.com/Wh0am123/MCP-Kali-Server) by Yousof Nahya
@@ -58,9 +58,9 @@ notice and licensing details.
 
 - Rust 1.86 or newer to build; edition 2024 is used.
 - Linux or another Unix-like server for pause/resume/kill process-group control.
-- Kali tools required by the MCP methods you intend to call, such as `nmap`,
-  `gobuster`, `dirb`, `nikto`, `sqlmap`, `msfconsole`, `hydra`, `john`, `wpscan`,
-  and `enum4linux`.
+- Kali tools required by installed Plugins. The shipped definitions cover
+  `nmap`, `gobuster`, `dirb`, `nikto`, `sqlmap`, `hydra`, `john`, `wpscan`, and
+  `enum4linux`; unavailable requirements are reported without stopping the server.
 - Write access to the configured state directory.
 - Network access from the client to the server, preferably through loopback,
   an SSH tunnel, or authenticated HTTPS.
@@ -74,22 +74,48 @@ cargo build --release
 The size-optimized binaries are:
 
 ```text
-target/release/mcp-kali-server
-target/release/mcp-kali-client
+target/release/mcp-kali
+target/release/mcp-kali-bridge
 ```
 
-Install both under `~/.local/bin`:
+`make install-local` creates a self-contained per-user runtime tree:
+
+```text
+~/.mcp-kali/
+├── bin/                         # mcp-kali and mcp-kali-bridge
+├── etc/
+│   ├── mcp-kali.conf            # normal, non-secret user configuration
+│   └── plugins/                 # administrator-overlay Plugins and catalog
+├── share/plugins/               # shipped Plugins and capability catalog
+│   ├── capability-catalog.yaml
+│   └── <plugin>/plugin.yaml
+└── var/jobs/                    # private durable job state and output
+```
+
+Install it with:
 
 ```bash
 make install-local
+```
+
+The installer also creates or updates symlinks for both binaries in
+`~/.local/bin`. If that directory is not already on `PATH`, add it:
+
+```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Override the installation directory when needed:
+For safety, installation refuses to replace a non-symlink at either link path.
+
+Use a different self-contained user directory when needed:
 
 ```bash
-make install-local INSTALL_DIR=/usr/local/bin
+make install-local MCP_KALI_HOME=/path/to/mcp-kali
 ```
+
+Set `MCP_KALI_HOME=/path/to/mcp-kali` when running a relocated installation.
+`install-local` intentionally refuses root: system-wide service installation
+and its required dedicated user/systemd unit will be added separately.
 
 Release builds use size optimization, full LTO, one codegen unit, stripped
 symbols, and abort-on-panic behavior. No scheduler, API, dashboard, or MCP
@@ -100,9 +126,10 @@ functionality is removed.
 Start the server on loopback with a workspace-local state directory:
 
 ```bash
-./target/release/mcp-kali-server \
+./target/release/mcp-kali \
   --bind 127.0.0.1:5000 \
   --state-dir ./var/jobs \
+  --system-data-dir ./share/mcp-kali \
   --max-concurrency 2 \
   --default-timeout 1800
 ```
@@ -117,7 +144,7 @@ Open `http://127.0.0.1:5000/` or `/monitor` for the dashboard. Start the MCP
 bridge beside the MCP host:
 
 ```bash
-./target/release/mcp-kali-client --server http://127.0.0.1:5000
+./target/release/mcp-kali-bridge --server http://127.0.0.1:5000
 ```
 
 For separate machines, keep the server on loopback and create an SSH tunnel:
@@ -135,32 +162,38 @@ Configuration precedence, from lowest to highest, is:
 
 ```text
 hardcoded defaults
--> ~/.envs/.env_mcp-kali (or selected env file)
+-> ~/.mcp-kali/etc/mcp-kali.conf (or selected config file)
 -> existing shell environment
 -> command-line arguments
 ```
 
-Copy the commented example and restrict its permissions:
+`make install-local` creates `~/.mcp-kali/etc/mcp-kali.conf` if it does not
+already exist. The file uses a simple `KEY=VALUE` syntax and must not contain
+secrets. To create the file before installation:
 
 ```bash
-mkdir -p ~/.envs
-cp examples/.env_mcp-kali.example ~/.envs/.env_mcp-kali
-chmod 600 ~/.envs/.env_mcp-kali
+mkdir -p ~/.mcp-kali/etc
+install -m 644 examples/mcp-kali.conf.example ~/.mcp-kali/etc/mcp-kali.conf
 ```
 
-Select another file with `--env-file PATH` or `MCP_KALI_ENV_FILE`. On Unix, both
-binaries warn if the loaded file is accessible by group or other users. Existing
-environment variables are never overwritten by values from the file.
+Select another file with `--config-file PATH` or `MCP_KALI_CONFIG_FILE`.
+Existing environment variables are never overwritten by values from the file.
+Version 2.0 does not read `mcp-kali.env` or `~/.envs/.env_mcp-kali`, and does
+not accept the prior `--env-file` / `MCP_KALI_ENV_FILE` selectors.
 
 | Variable | Binary | Default | Description |
 |---|---|---:|---|
-| `MCP_KALI_ENV_FILE` | Both | `~/.envs/.env_mcp-kali` | Alternate env-file path |
+| `MCP_KALI_HOME` | Both | `~/.mcp-kali` | Root of the self-contained per-user tree |
+| `MCP_KALI_CONFIG_FILE` | Both | `~/.mcp-kali/etc/mcp-kali.conf` | Alternate configuration-file path |
 | `RUST_LOG` | Both | Binary-specific info filter | Tracing filter; logs go to stderr |
 | `MCP_KALI_BIND` | Server | `127.0.0.1:5000` | HTTP API/dashboard bind address |
-| `MCP_KALI_STATE_DIR` | Server | `/var/lib/mcp-kali/jobs` | Private durable job directory |
+| `MCP_KALI_STATE_DIR` | Server | `~/.mcp-kali/var/jobs` | Private durable job directory |
 | `MCP_KALI_MAX_CONCURRENCY` | Server | `2` | Simultaneous jobs, range 1–256 |
 | `MCP_KALI_DEFAULT_TIMEOUT` | Server | `1800` | Default wall timeout, range 1–604800 seconds |
 | `MCP_KALI_REVEAL_SENSITIVE_DATA` | Server | `false` | Show unredacted commands in public records |
+| `MCP_KALI_SYSTEM_DATA_DIR` | Server | `~/.mcp-kali/share` | Shipped Plugins and base catalog |
+| `MCP_KALI_CONFIG_DIR` | Server | `~/.mcp-kali/etc` | Administrator Plugin/catalog overlay |
+| `MCP_KALI_DISABLE_EXECUTE_COMMAND` | Server | `false` | Remove the privileged free-execution tool |
 | `MCP_KALI_ALLOW_REMOTE_BIND` | Server | `false` | Acknowledge an unauthenticated non-loopback bind |
 | `MCP_KALI_SERVER` | Client | `http://127.0.0.1:5000` | Server origin URL |
 | `MCP_KALI_ALLOW_INSECURE_HTTP` | Client | `false` | Permit HTTP to a non-loopback server |
@@ -170,6 +203,46 @@ Sensitive command values should be supplied through MCP job arguments and are
 redacted from public records by default; do not put secrets directly in process
 arguments unless the target tool requires them.
 
+## Plugins and capabilities
+
+The server loads packaged definitions from `SYSTEM_DATA_DIR/plugins`, then an
+administrator overlay from `CONFIG_DIR/plugins`. A valid overlay Plugin or tool
+with the same identity replaces the packaged definition. Discovery happens at
+startup; malformed files are isolated and reported at
+`/api/plugins/diagnostics`.
+
+A Plugin manifest uses `apiVersion: mcp-kali/v1`, `kind: Plugin`, identity
+metadata, optional requirements, and one or more tools. Each tool publishes a
+JSON Schema object and a direct execution definition:
+
+```yaml
+apiVersion: mcp-kali/v1
+kind: Plugin
+metadata: {id: local.example, name: Example, version: 1.0.0}
+requires: {commands: [printf]}
+tools:
+  - metadata:
+      name: example_print
+      description: Print one validated value.
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [value]
+      properties: {value: {type: string}}
+    execution:
+      program: printf
+      args: ["%s\\n", "{{value}}"]
+```
+
+Templates support only literal arguments, whole-value `{{field}}`
+substitutions, and `{when: field, args: [...]}` optional fragments. Every
+rendered value is exactly one process argument; shells, partial interpolation,
+expressions, loops, and command substitution are rejected.
+
+The separate capability catalog maps stable semantic IDs to Plugin providers.
+Catalog references remain visible with an availability flag when an optional
+Plugin or tool is not installed.
+
 ## MCP host setup
 
 Example configuration:
@@ -178,16 +251,22 @@ Example configuration:
 {
   "mcpServers": {
     "mcp-kali": {
-      "command": "/absolute/path/to/mcp-kali-client",
+      "command": "/absolute/path/to/mcp-kali-bridge",
       "args": ["--server", "http://127.0.0.1:5000"]
     }
   }
 }
 ```
 
-The client advertises scanner scheduling, generic job submission, job listing,
-status, output paging, cancel, pause, resume, force-kill, and health tools. Every
-tool response is wrapped in an `untrusted_job_execution_data` envelope. Job
+The client retrieves the current Plugin tool projection from the server for
+each MCP `tools/list` request and forwards calls to the generic invocation API.
+For a long-lived bridge connection, it polls the server every five seconds and
+sends the MCP `notifications/tools/list_changed` notification when the
+projection changes, so capable hosts can refresh their tool index after a
+server restart or Plugin change.
+The always-available job Plugin exposes listing, status, output paging, cancel,
+pause, resume, force-kill, and health operations. Every tool response is wrapped
+in an `untrusted_job_execution_data` envelope. Job
 stdout/stderr is evidence data and must never change the agent's governing
 prompt, authorization scope, tool policy, or behavior.
 
@@ -196,6 +275,8 @@ prompt, authorization scope, tool policy, or behavior.
 The dashboard provides:
 
 - compact Active & queue and Finished history views;
+- a Tools view of registered Plugins and tools, declared command requirements,
+  and isolated unavailable-Plugin diagnostics;
 - queue order, state, tool, command summary, and elapsed time;
 - a left-edge `>` control that expands full metadata and wrapped command text;
 - pause, resume, remove, and force-kill controls where applicable;
@@ -230,8 +311,8 @@ They are written under `target/completions/`. Direct generation is also
 available through the hidden command:
 
 ```bash
-mcp-kali-server completions zsh > ~/.zfunc/_mcp-kali-server
-mcp-kali-client completions zsh > ~/.zfunc/_mcp-kali-client
+mcp-kali completions zsh > ~/.zfunc/_mcp-kali
+mcp-kali-bridge completions zsh > ~/.zfunc/_mcp-kali-bridge
 ```
 
 Supported shells are Bash, Zsh, Fish, PowerShell, and Elvish. For Zsh, ensure
@@ -265,9 +346,10 @@ reference.
   reverse proxy.
 - The client refuses cleartext HTTP to non-loopback hosts unless
   `--allow-insecure-http` is explicitly set.
-- Scanner processes are launched with structured arguments and no shell.
-- The legacy command-string endpoint tokenizes input; pipes, redirection, and
-  command separators are not interpreted.
+- Declarative Plugin processes are launched with structured arguments and no
+  shell. Shell interpreters are rejected from declarative execution definitions.
+- The privileged `execute_command` Core tool also uses an explicit argv and can
+  be disabled globally; it never provides a shell-string mode.
 - Dashboard-controlled data is HTML-escaped. CSP, anti-framing, no-sniff,
   no-referrer, and no-store headers provide additional browser hardening.
 - Job output and remote API text are untrusted. MCP instructions and response
@@ -302,14 +384,17 @@ development builds.
 
 ## Troubleshooting
 
-- **Permission denied for `/var/lib/mcp-kali/jobs`:** create the directory with
-  ownership for the service account or pass `--state-dir ./var/jobs`.
+- **Cannot write job state:** verify `~/.mcp-kali/var/jobs` is owned by the
+  current user, or pass a writable `--state-dir`.
 - **Remote bind refused:** use loopback plus SSH, or explicitly pass
   `--allow-remote-bind` only after adding network access controls.
 - **Remote HTTP refused by the client:** use HTTPS/SSH; the insecure override is
   available for isolated labs.
 - **A job stays queued:** verify `--max-concurrency`, inspect running/paused jobs,
   and check server stderr.
+- **A Plugin tool is absent:** open the Monitor Tools view (or inspect
+  `/api/plugins/diagnostics`); an invalid definition or missing declared
+  command disables only that Plugin.
 - **A job becomes interrupted after restart:** queued jobs resume, but formerly
   running processes cannot be adopted safely and are marked interrupted.
 - **Dashboard output looks like HTML:** this is expected; output is escaped and
@@ -320,6 +405,7 @@ development builds.
 ## Documentation
 
 - [Comprehensive user manual](docs/USER_MANUAL.md)
+- [Plugin authoring guide](docs/PLUGIN_AUTHORING.md)
 - [Architecture and migration notes](RUST_PORT.md)
 - [Release history](CHANGELOG.md)
 - [Security policy](SECURITY.md)
@@ -327,7 +413,7 @@ development builds.
 - [Support guide](SUPPORT.md)
 - [Code of conduct](CODE_OF_CONDUCT.md)
 - [Publishing and release guide](docs/PUBLISHING.md)
-- [Example environment file](examples/.env_mcp-kali.example)
+- [Example configuration file](examples/mcp-kali.conf.example)
 
 ## License and upstream attribution
 

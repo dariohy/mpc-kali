@@ -1,0 +1,27 @@
+# `make install-local` creates ~/.mcp-kali/etc/mcp-kali.conf from this file.
+# It contains no secrets and uses a simple KEY=VALUE configuration format.
+# Existing shell variables override this file; command-line flags override both.
+
+# Shared configuration
+RUST_LOG=mcp_kali=info,tower_http=info
+
+# mcp-kali. Uncomment only to override the user-install defaults.
+# MCP_KALI_BIND=127.0.0.1:5000
+# MCP_KALI_HOME=/home/your-user/.mcp-kali
+# MCP_KALI_STATE_DIR=/home/your-user/.mcp-kali/var/jobs
+# Read-only packaged Plugin tree and administrator overlay.
+# MCP_KALI_SYSTEM_DATA_DIR=/home/your-user/.mcp-kali/share
+# MCP_KALI_CONFIG_DIR=/home/your-user/.mcp-kali/etc
+# Disable the privileged Core Plugin execute_command tool.
+# MCP_KALI_DISABLE_EXECUTE_COMMAND=false
+MCP_KALI_MAX_CONCURRENCY=2
+MCP_KALI_DEFAULT_TIMEOUT=1800
+MCP_KALI_REVEAL_SENSITIVE_DATA=false
+MCP_KALI_ALLOW_REMOTE_BIND=false
+
+# mcp-kali-bridge
+MCP_KALI_SERVER=http://127.0.0.1:5000
+MCP_KALI_ALLOW_INSECURE_HTTP=false
+
+# Optional: select another configuration file.
+# MCP_KALI_CONFIG_FILE=/path/to/mcp-kali.conf
