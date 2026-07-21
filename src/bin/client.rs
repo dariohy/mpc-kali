@@ -14,7 +14,7 @@ use tracing_subscriber::EnvFilter;
 )]
 struct Cli {
     /// Load defaults from this configuration file. Shell variables and CLI flags override it.
-    #[arg(long, env = "MCP_KALI_CONFIG_FILE", global = true, value_name = "PATH")]
+    #[arg(long, global = true, value_name = "PATH")]
     config_file: Option<PathBuf>,
 
     /// Base URL of the Kali-side mcp-kali API.

@@ -227,7 +227,7 @@ install-system: release
 	fi
 	install -m 0644 "examples/mcp-kali.config.example" "$(SYSTEM_CONFIG_EXAMPLE_FILE)"
 	@service_home="$$(getent passwd "$(MCP_KALI_USER)" | awk -F: 'NR == 1 { print $$6 }')"; \
-		sed -e 's|@MCP_KALI_USER@|$(MCP_KALI_USER)|g' -e 's|@MCP_KALI_GROUP@|$(MCP_KALI_GROUP)|g' -e 's|@MCP_KALI_HOME@|'"$$service_home"'|g' -e 's|@MCP_KALI_BIN@|$(SYSTEM_BIN_DIR)/$(SERVER_BIN)|g' -e 's|@MCP_KALI_CONFIG_FILE@|$(SYSTEM_CONFIG_FILE)|g' -e 's|@MCP_KALI_SYSTEM_DATA_DIR@|$(SYSTEM_DATA_DIR)|g' -e 's|@MCP_KALI_CONFIG_DIR@|$(SYSTEM_CONFIG_DIR)|g' "systemd/mcp-kali.service.in" > "$(SYSTEM_UNIT_FILE)"
+		sed -e 's|@MCP_KALI_USER@|$(MCP_KALI_USER)|g' -e 's|@MCP_KALI_GROUP@|$(MCP_KALI_GROUP)|g' -e 's|@MCP_KALI_HOME@|'"$$service_home"'|g' -e 's|@MCP_KALI_BIN@|$(SYSTEM_BIN_DIR)/$(SERVER_BIN)|g' -e 's|@MCP_KALI_CONFIG_PATH@|$(SYSTEM_CONFIG_FILE)|g' -e 's|@MCP_KALI_SYSTEM_DATA_DIR@|$(SYSTEM_DATA_DIR)|g' -e 's|@MCP_KALI_CONFIG_DIR@|$(SYSTEM_CONFIG_DIR)|g' "systemd/mcp-kali.service.in" > "$(SYSTEM_UNIT_FILE)"
 	chmod 0644 "$(SYSTEM_UNIT_FILE)"
 	sed -e 's|@MCP_KALI_USER@|$(MCP_KALI_USER)|g' -e 's|@MCP_KALI_GROUP@|$(MCP_KALI_GROUP)|g' "systemd/mcp-kali.logrotate.in" > "$(SYSTEM_LOGROTATE_FILE)"
 	chmod 0644 "$(SYSTEM_LOGROTATE_FILE)"

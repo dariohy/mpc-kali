@@ -5,7 +5,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const CONFIG_FILE_VARIABLE: &str = "MCP_KALI_CONFIG_FILE";
 const HOME_VARIABLE: &str = "MCP_KALI_HOME";
 const SYSTEM_CONFIG_FILE: &str = "/etc/mcp-kali/mcp-kali.config";
 const LEGACY_SYSTEM_CONFIG_FILE: &str = "/etc/mcp-kali/mcp-kali.conf";
@@ -16,9 +15,8 @@ const LEGACY_SYSTEM_CONFIG_FILE: &str = "/etc/mcp-kali/mcp-kali.conf";
 /// because dotenv does not overwrite them; explicit CLI arguments win over both.
 pub fn load_config_file() -> Result<Option<PathBuf>> {
     let cli_path = config_file_from_args(env::args_os())?;
-    let environment_path = env::var_os(CONFIG_FILE_VARIABLE).map(PathBuf::from);
-    let explicit = cli_path.is_some() || environment_path.is_some();
-    let path = cli_path.or(environment_path).or_else(default_config_file);
+    let explicit = cli_path.is_some();
+    let path = cli_path.or_else(default_config_file);
 
     let Some(path) = path.map(expand_home) else {
         return Ok(None);

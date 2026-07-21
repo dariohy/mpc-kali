@@ -20,7 +20,7 @@ use tokio_util::sync::CancellationToken;
 )]
 struct Cli {
     /// Load defaults from this configuration file. Shell variables and CLI flags override it.
-    #[arg(long, env = "MCP_KALI_CONFIG_FILE", global = true, value_name = "PATH")]
+    #[arg(long, global = true, value_name = "PATH")]
     config_file: Option<PathBuf>,
 
     /// Address for the local HTTP API and dashboard.

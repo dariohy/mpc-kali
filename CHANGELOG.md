@@ -167,7 +167,7 @@ All notable changes to MCP Kali are documented here. The project follows
 - User installation creates or updates safe `~/.local/bin` symlinks for both
   MCP Kali binaries.
 - Replaced the per-user `.env` contract with a non-secret `mcp-kali.config`
-  configuration file and the canonical `--config-file` / `MCP_KALI_CONFIG_FILE`
+  configuration file and the canonical `--config-file`
   selectors.
 - Moved the shipped Capability Catalog into the Plugin data directory and made
   per-user paths the runtime defaults.

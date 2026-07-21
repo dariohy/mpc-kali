@@ -284,16 +284,10 @@ The default configuration file is:
 ~/.mcp-kali/etc/mcp-kali.config
 ```
 
-Choose another path with either:
+Choose another path with:
 
 ```bash
 mcp-kali --config-file /path/to/mcp-kali.config
-```
-
-or:
-
-```bash
-export MCP_KALI_CONFIG_FILE=/path/to/mcp-kali.config
 ```
 
 An explicitly selected missing file is an error. A missing default file is
@@ -316,7 +310,6 @@ directly. The installed `mcp-kali.config` is ready to launch.
 | Variable | Required | Default | Meaning |
 |---|---:|---|---|
 | `MCP_KALI_HOME` | No | `~/.mcp-kali` | Root of the self-contained per-user tree |
-| `MCP_KALI_CONFIG_FILE` | No | `/etc/mcp-kali/mcp-kali.config` when present, otherwise `~/.mcp-kali/etc/mcp-kali.config` | Alternate configuration-file path |
 | `RUST_LOG` | No | `mcp_kali=info` plus server HTTP info | Tracing filter; server destination is selected below, bridge diagnostics use stderr |
 
 Examples:
@@ -462,7 +455,7 @@ The installer renders an explicit `WorkingDirectory` from the selected `User=`
 account's home directory; outside systemd, mcp-kali leaves the invoking
 process's working directory unchanged.
 
-Without an explicit `--config-file` or `MCP_KALI_CONFIG_FILE`, the binaries use
+Without an explicit `--config-file`, the binaries use
 `/etc/mcp-kali/mcp-kali.config` when it exists; otherwise they use the normal
 per-user `~/.mcp-kali/etc/mcp-kali.config` fallback. Legacy `.conf` paths are
 consulted only when neither canonical file exists.
@@ -1594,16 +1587,16 @@ longer a built-in adapter; authorized operators may use the privileged
 argv-only Core tool until a dedicated reviewed Plugin contract exists.
 
 Version 2.0.0 also removes the legacy configuration path and selectors. Create
-`~/.mcp-kali/etc/mcp-kali.config` and use `--config-file` or
-`MCP_KALI_CONFIG_FILE`; `mcp-kali.env`, `~/.envs/.env_mcp-kali`, `--env-file`,
-and `MCP_KALI_ENV_FILE` are not recognized.
+`~/.mcp-kali/etc/mcp-kali.config` and use `--config-file` for an alternate
+path; `mcp-kali.env`, `~/.envs/.env_mcp-kali`, `--env-file`, and
+`MCP_KALI_ENV_FILE` are not recognized.
 
 ## 19. Troubleshooting
 
 ### `configuration file does not exist`
 
-An explicit `--config-file` or `MCP_KALI_CONFIG_FILE` path was missing. Correct the
-path or remove the explicit selector to use the optional default.
+The explicit `--config-file` path was missing. Correct the path or remove the
+selector to use the optional default.
 
 Do not place credentials, passwords, or tokens in the configuration file.
 

@@ -174,7 +174,7 @@ and `make archive-jobs-system` for operations; `systemctl reload mcp-kali` maps
 to `SIGHUP`. The service runs from the selected service user's home directory;
 standalone runs retain the invoking shell's working directory.
 
-When no `--config-file` or `MCP_KALI_CONFIG_FILE` is selected, MCP Kali uses
+Without `--config-file`, MCP Kali uses
 `/etc/mcp-kali/mcp-kali.config` if it exists. If it does not, it falls back to
 the per-user `~/.mcp-kali/etc/mcp-kali.config` lookup. Legacy `.conf` files are
 used only when neither canonical `.config` file exists.
@@ -238,7 +238,7 @@ installer rather than copying it directly:
 make install-local
 ```
 
-Select another file with `--config-file PATH` or `MCP_KALI_CONFIG_FILE`.
+Select another file with `--config-file PATH`.
 Existing environment variables are never overwritten by values from the file.
 Version 2.0 does not read `mcp-kali.env` or `~/.envs/.env_mcp-kali`, and does
 not accept the prior `--env-file` / `MCP_KALI_ENV_FILE` selectors.
@@ -246,7 +246,6 @@ not accept the prior `--env-file` / `MCP_KALI_ENV_FILE` selectors.
 | Variable | Binary | Default | Description |
 |---|---|---:|---|
 | `MCP_KALI_HOME` | Both | `~/.mcp-kali` | Root of the self-contained per-user tree |
-| `MCP_KALI_CONFIG_FILE` | Both | `/etc/mcp-kali/mcp-kali.config` when present, otherwise `~/.mcp-kali/etc/mcp-kali.config` | Alternate configuration-file path |
 | `RUST_LOG` | Both | Binary-specific info filter | Tracing filter; server output follows `MCP_KALI_LOG_DIR`, while bridge diagnostics stay on stderr |
 | `MCP_KALI_BIND` | Server | `127.0.0.1:5000` | HTTP API/dashboard bind address |
 | `MCP_KALI_STATE_DIR` | Server | `~/.mcp-kali/var/lib/jobs` | Private durable job directory |

@@ -196,7 +196,7 @@ with their environment.
 
 Both binaries load `~/.mcp-kali/etc/mcp-kali.config` before Clap parsing.
 `MCP_KALI_HOME` relocates the complete per-user tree; an explicit
-`--config-file` or `MCP_KALI_CONFIG_FILE` selects another file. The `KEY=VALUE`
+`--config-file` selects another file. The `KEY=VALUE`
 configuration file is non-secret: credentials, passwords, and tokens do not
 belong there. Dotenv values do not override the pre-existing shell environment;
 CLI flags override configuration values.

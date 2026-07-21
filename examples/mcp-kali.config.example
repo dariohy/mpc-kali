@@ -66,6 +66,3 @@ MCP_KALI_BRIDGE_SERVER=http://127.0.0.1:5000
 MCP_KALI_BRIDGE_ALLOW_INSECURE_HTTP=false
 # MCP_KALI_SERVER and MCP_KALI_ALLOW_INSECURE_HTTP remain accepted only as
 # compatibility aliases when their MCP_KALI_BRIDGE_* counterparts are unset.
-
-# Optional explicit configuration path for either binary.
-# MCP_KALI_CONFIG_FILE=/path/to/mcp-kali.config
