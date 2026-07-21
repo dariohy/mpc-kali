@@ -61,7 +61,8 @@ notice and licensing details.
 - Linux or another Unix-like server for pause/resume/kill process-group control.
 - Kali tools required by installed Plugins. The shipped definitions cover
   `nmap`, `gobuster`, `dirb`, `nikto`, `sqlmap`, `hydra`, `john`, `wpscan`, and
-  `enum4linux`; unavailable requirements are reported without stopping the server.
+  `enum4linux`, and `dnsrecon`; unavailable requirements are reported without
+  stopping the server.
 - Write access to the configured state directory.
 - Network access from the client to the server, preferably through loopback,
   an SSH tunnel, or authenticated HTTPS.

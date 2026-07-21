@@ -15,6 +15,21 @@ All notable changes to MCP Kali are documented here. The project follows
 - Curated Nmap profiles for ARP discovery, privileged SYN and UDP service
   detection, OS fingerprinting, TLS configuration, SMB security posture, and
   web-service inventory, with packaged selection and interpretation guidance.
+- Focused enum4linux profiles for anonymous SMB users, groups, shares, password
+  policy, OS and NetBIOS identity, printers, and bounded RID discovery, with
+  packaged workflow, boundary, and result-interpretation guidance.
+- Non-destructive Nikto profiles for broad web-server assessment, focused
+  configuration and software checks, HTTPS, virtual hosts, and fixed
+  rate-limited production scanning, with packaged operator guidance.
+- Low-risk SQLmap profiles for targeted GET/POST detection and bounded DBMS,
+  database-name, and table-name inventory without extraction or host access.
+- Mode-correct Gobuster profiles for directory, extension, DNS, virtual-host,
+  URL-fuzz, and fixed rate-limited discovery.
+- Token-free WPScan profiles for WordPress fingerprinting, component inventory,
+  bounded user enumeration, exposed artifacts, and fixed rate limiting.
+- A bundled DNSRecon Plugin with standard and SRV records, AXFR checks,
+  certificate-transparency lookup, wildcard-filtered subdomain discovery,
+  bounded IPv4 reverse lookup, and DNSSEC zone-walk profiles.
 
 ### Changed
 
@@ -24,6 +39,19 @@ All notable changes to MCP Kali are documented here. The project follows
 - Make normal Nmap host discovery and TCP service detection unprivileged,
   reserve root metadata for probe types that require raw-packet access, and
   constrain targets and port expressions in every Nmap profile.
+- Constrain enum4linux profiles to one non-option host and keep credentials,
+  unbounded enumeration, brute-force guessing, LDAP expansion, and write tests
+  outside the declarative default surface.
+- Require explicit HTTP(S) URLs for Nikto profiles, disable interactive update
+  behavior, and exclude disruptive tuning categories from broad declarative
+  scans while preserving advanced behavior through reviewed command execution.
+- Constrain SQLmap to level 1, risk 1, and non-stacked techniques; require
+  explicit credential-free URLs; and keep extraction, evasion, credentials,
+  higher risk, filesystem, and OS access outside the declarative surface.
+- Replace Gobuster's ambiguous cross-mode invocation with mode-specific schemas,
+  absolute wordlist paths, fixed worker profiles, and stable captured output.
+- Make WPScan enumeration explicit and repeatable without API tokens, database
+  updates, credentials, aggressive detection, or password attacks.
 
 ### Fixed
 

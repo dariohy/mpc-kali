@@ -577,10 +577,29 @@ nmap_service_scan          nmap_syn_service_scan
 nmap_udp_service_scan      nmap_os_detection
 nmap_tls_audit             nmap_smb_security_audit
 nmap_web_inventory
-gobuster_content_discovery dirb_content_discovery
-nikto_web_scan             sqlmap_parameter_test
+dnsrecon_standard_enumeration dnsrecon_srv_enumeration
+dnsrecon_zone_transfer_check  dnsrecon_certificate_transparency
+dnsrecon_subdomain_bruteforce dnsrecon_reverse_lookup
+dnsrecon_dnssec_zonewalk
+gobuster_content_discovery gobuster_extension_discovery
+gobuster_dns_discovery     gobuster_vhost_discovery
+gobuster_fuzz_discovery    gobuster_rate_limited_discovery
+dirb_content_discovery
+nikto_web_scan             nikto_configuration_scan
+nikto_software_scan        nikto_https_scan
+nikto_vhost_scan           nikto_rate_limited_scan
+sqlmap_parameter_test      sqlmap_get_parameter_test
+sqlmap_post_parameter_test sqlmap_database_context
+sqlmap_database_inventory  sqlmap_table_inventory
 hydra_authentication_test  john_password_crack
-wpscan_web_scan             enum4linux_enumerate
+wpscan_web_scan             wpscan_passive_scan
+wpscan_plugin_inventory     wpscan_theme_inventory
+wpscan_user_enumeration     wpscan_exposure_scan
+wpscan_rate_limited_scan    enum4linux_enumerate
+enum4linux_users            enum4linux_groups
+enum4linux_shares           enum4linux_password_policy
+enum4linux_os_info          enum4linux_netbios_info
+enum4linux_printers         enum4linux_rid_users
 ```
 
 Their authoritative input schemas are returned by `tools/list` and
@@ -590,6 +609,46 @@ creates a diagnostic.
 The John Plugin accepts complete `--wordlist=PATH` and optional `--format=NAME`
 values because John's option value is part of the same process argument. JSON
 Schema constrains both forms; no shell or partial interpolation is used.
+
+The enum4linux Plugin exposes anonymous, single-host, read-oriented profiles.
+Use its focused tools when only users, groups, shares, password policy, SMB OS
+hints, NetBIOS identity, printers, or default-range RID resolution are needed;
+`enum4linux_enumerate` remains the broad `-a` baseline. Credentialed sessions,
+custom or exhaustive RID ranges, share-name guessing, LDAP enumeration, and
+aggressive write checks are intentionally not parameterized by these tools.
+
+The Nikto Plugin requires an explicit HTTP(S) URL and uses non-interactive,
+offline-database profiles. Its broad profiles exclude denial-of-service,
+command-execution, SQL-injection, file-upload, and remote-source-inclusion
+tuning categories. Focused configuration and software checks, explicit HTTPS,
+named virtual-host, and fixed rate-limited scans are available. Redirect
+following, credentials, proxies, local output paths, target files, CGI
+expansion, evasion, mutation, and custom tuning remain reviewed advanced uses.
+
+The SQLmap Plugin fixes every profile at level 1 and risk 1 and excludes
+stacked-query techniques. It supports targeted GET/POST detection and bounded
+DBMS context, database-name, and table-name inventory. Credentials, captured
+requests, crawling, evasion, higher risk, row extraction, filesystem access,
+and operating-system execution remain reviewed advanced uses.
+
+The Gobuster Plugin publishes separate mode-correct tools for directory,
+extension, DNS, virtual-host, URL-fuzz, and fixed rate-limited discovery.
+Wordlists must use absolute paths, web targets require explicit HTTP(S) URLs,
+and Gobuster does not recurse. Credentials, redirects, TLS bypass, arbitrary
+filters, cloud/TFTP modes, custom routing, and output files remain advanced.
+
+The WPScan Plugin provides token-free WordPress fingerprinting, passive and
+mixed plugin/theme inventory, bounded user enumeration, exposed-artifact
+checks, and fixed rate limiting. Jobs use the installed database without
+updating it. API tokens, target credentials, password attacks, force/aggressive
+modes, proxies, TLS bypass, custom paths, and output files remain advanced.
+
+The DNSRecon Plugin provides bounded standard/SRV record enumeration, AXFR
+checks, certificate-transparency lookup, wildcard-filtered wordlist discovery,
+IPv4 reverse lookup limited to `/24` or smaller, and DNSSEC zone walking.
+WHOIS/SPF pivots, search-engine scraping, cache snooping, TLD expansion, bulk
+targets, custom resolvers, arbitrary ranges, and local output paths remain
+reviewed advanced uses.
 
 The built-in `mcp-kali.core` Plugin publishes `execute_command` and
 `explore_command`. `execute_command` accepts `program` plus a string `args`
@@ -890,7 +949,7 @@ Submission limits:
 Supported `{tool}` values:
 
 ```text
-nmap gobuster dirb nikto sqlmap metasploit hydra john wpscan enum4linux
+nmap gobuster dirb nikto sqlmap metasploit hydra john wpscan enum4linux dnsrecon
 ```
 
 Example:

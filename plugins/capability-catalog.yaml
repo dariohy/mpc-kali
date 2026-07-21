@@ -32,6 +32,25 @@ capabilities:
     providers:
       - plugin: org.mcp-kali.nmap
         tools: [nmap_service_scan, nmap_syn_service_scan, nmap_udp_service_scan]
+  - id: network.dns_discovery
+    description: Discover names beneath an authorized DNS domain.
+    providers:
+      - plugin: org.mcp-kali.gobuster
+        tools: [gobuster_dns_discovery]
+      - plugin: org.mcp-kali.dnsrecon
+        tools:
+          - dnsrecon_certificate_transparency
+          - dnsrecon_dnssec_zonewalk
+          - dnsrecon_reverse_lookup
+          - dnsrecon_srv_enumeration
+          - dnsrecon_standard_enumeration
+          - dnsrecon_subdomain_bruteforce
+          - dnsrecon_zone_transfer_check
+  - id: network.dns_configuration_analysis
+    description: Assess authoritative DNS configuration and DNSSEC record exposure.
+    providers:
+      - plugin: org.mcp-kali.dnsrecon
+        tools: [dnsrecon_dnssec_zonewalk, dnsrecon_zone_transfer_check]
   - id: network.os_fingerprinting
     description: Infer the operating system of an authorized target from network responses.
     providers:
@@ -48,19 +67,56 @@ capabilities:
       - plugin: org.mcp-kali.nmap
         tools: [nmap_web_inventory]
   - id: web.content_discovery
-    description: Discover web content, paths, or virtual hosts.
+    description: Discover web content or paths.
     providers:
       - plugin: org.mcp-kali.gobuster
+        tools:
+          - gobuster_content_discovery
+          - gobuster_extension_discovery
+          - gobuster_fuzz_discovery
+          - gobuster_rate_limited_discovery
       - plugin: org.mcp-kali.dirb
+  - id: web.virtual_host_discovery
+    description: Discover named virtual hosts on an authorized web endpoint.
+    providers:
+      - plugin: org.mcp-kali.gobuster
+        tools: [gobuster_vhost_discovery]
   - id: web.vulnerability_analysis
     description: Assess a web application for known weaknesses.
     providers:
       - plugin: org.mcp-kali.nikto
+        tools:
+          - nikto_configuration_scan
+          - nikto_https_scan
+          - nikto_rate_limited_scan
+          - nikto_software_scan
+          - nikto_vhost_scan
+          - nikto_web_scan
       - plugin: org.mcp-kali.wpscan
+        tools: [wpscan_exposure_scan, wpscan_rate_limited_scan, wpscan_web_scan]
+  - id: web.wordpress_inventory
+    description: Inventory an authorized WordPress installation and its exposed components.
+    providers:
+      - plugin: org.mcp-kali.wpscan
+        tools:
+          - wpscan_exposure_scan
+          - wpscan_passive_scan
+          - wpscan_plugin_inventory
+          - wpscan_rate_limited_scan
+          - wpscan_theme_inventory
+          - wpscan_user_enumeration
+          - wpscan_web_scan
   - id: web.injection_testing
     description: Test web inputs for SQL injection behavior.
     providers:
       - plugin: org.mcp-kali.sqlmap
+        tools:
+          - sqlmap_database_context
+          - sqlmap_database_inventory
+          - sqlmap_get_parameter_test
+          - sqlmap_parameter_test
+          - sqlmap_post_parameter_test
+          - sqlmap_table_inventory
   - id: credential.authentication_testing
     description: Test authorized credentials against a network service.
     providers:
@@ -75,3 +131,13 @@ capabilities:
       - plugin: org.mcp-kali.nmap
         tools: [nmap_smb_security_audit]
       - plugin: org.mcp-kali.enum4linux
+        tools:
+          - enum4linux_enumerate
+          - enum4linux_groups
+          - enum4linux_netbios_info
+          - enum4linux_os_info
+          - enum4linux_password_policy
+          - enum4linux_printers
+          - enum4linux_rid_users
+          - enum4linux_shares
+          - enum4linux_users

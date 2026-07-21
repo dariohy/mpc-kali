@@ -3,21 +3,192 @@ kind: Plugin
 metadata:
   id: org.mcp-kali.enum4linux
   name: enum4linux
-  version: 1.0.0
+  version: 2.0.0
+  description: Safe, repeatable anonymous SMB, Windows, and Samba enumeration profiles.
 categories: [information-gathering]
-tags: [smb, windows]
+tags: [smb, windows, samba, inventory]
 requires:
   commands: [enum4linux]
 tools:
   - metadata:
       name: enum4linux_enumerate
-      description: Enumerate SMB information from an authorized target.
+      description: Run the broad read-oriented enum4linux baseline against one authorized SMB host using a null session.
+      categories: [information-gathering]
+      tags: [smb, baseline, anonymous]
     input_schema:
       type: object
       additionalProperties: false
       required: [target]
       properties:
-        target: {type: string, minLength: 1, maxLength: 65536}
+        target: {$ref: "#/$defs/target"}
+      $defs:
+        target:
+          type: string
+          minLength: 1
+          maxLength: 253
+          pattern: "^[A-Za-z0-9][A-Za-z0-9.:_%-]{0,252}$"
     execution:
       program: enum4linux
       args: [-a, "{{target}}"]
+    policy:
+      timeout_seconds: 1800
+  - metadata:
+      name: enum4linux_users
+      description: Request the user list exposed anonymously by one authorized SMB host.
+      categories: [information-gathering]
+      tags: [smb, users, anonymous]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [target]
+      properties:
+        target:
+          type: string
+          minLength: 1
+          maxLength: 253
+          pattern: "^[A-Za-z0-9][A-Za-z0-9.:_%-]{0,252}$"
+    execution:
+      program: enum4linux
+      args: [-U, "{{target}}"]
+    policy:
+      timeout_seconds: 600
+  - metadata:
+      name: enum4linux_groups
+      description: Request group and membership information exposed anonymously by one authorized SMB host.
+      categories: [information-gathering]
+      tags: [smb, groups, membership, anonymous]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [target]
+      properties:
+        target:
+          type: string
+          minLength: 1
+          maxLength: 253
+          pattern: "^[A-Za-z0-9][A-Za-z0-9.:_%-]{0,252}$"
+    execution:
+      program: enum4linux
+      args: [-G, "{{target}}"]
+    policy:
+      timeout_seconds: 600
+  - metadata:
+      name: enum4linux_shares
+      description: List SMB shares and test anonymous mapping and directory-listing access on one authorized host.
+      categories: [information-gathering]
+      tags: [smb, shares, access, anonymous]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [target]
+      properties:
+        target:
+          type: string
+          minLength: 1
+          maxLength: 253
+          pattern: "^[A-Za-z0-9][A-Za-z0-9.:_%-]{0,252}$"
+    execution:
+      program: enum4linux
+      args: [-S, "{{target}}"]
+    policy:
+      timeout_seconds: 900
+  - metadata:
+      name: enum4linux_password_policy
+      description: Retrieve the password and lockout policy exposed anonymously by one authorized SMB host.
+      categories: [information-gathering]
+      tags: [smb, password-policy, lockout, anonymous]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [target]
+      properties:
+        target:
+          type: string
+          minLength: 1
+          maxLength: 253
+          pattern: "^[A-Za-z0-9][A-Za-z0-9.:_%-]{0,252}$"
+    execution:
+      program: enum4linux
+      args: [-P, "{{target}}"]
+    policy:
+      timeout_seconds: 600
+  - metadata:
+      name: enum4linux_os_info
+      description: Collect operating-system and server hints advertised over SMB by one authorized host.
+      categories: [information-gathering]
+      tags: [smb, os, fingerprinting, anonymous]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [target]
+      properties:
+        target:
+          type: string
+          minLength: 1
+          maxLength: 253
+          pattern: "^[A-Za-z0-9][A-Za-z0-9.:_%-]{0,252}$"
+    execution:
+      program: enum4linux
+      args: [-o, "{{target}}"]
+    policy:
+      timeout_seconds: 600
+  - metadata:
+      name: enum4linux_netbios_info
+      description: Query the NetBIOS name table of one authorized host over UDP port 137.
+      categories: [information-gathering]
+      tags: [netbios, identity, services, anonymous]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [target]
+      properties:
+        target:
+          type: string
+          minLength: 1
+          maxLength: 253
+          pattern: "^[A-Za-z0-9][A-Za-z0-9.:_%-]{0,252}$"
+    execution:
+      program: enum4linux
+      args: [-n, "{{target}}"]
+    policy:
+      timeout_seconds: 600
+  - metadata:
+      name: enum4linux_printers
+      description: Request printer inventory exposed anonymously over RPC by one authorized SMB host.
+      categories: [information-gathering]
+      tags: [smb, printers, inventory, anonymous]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [target]
+      properties:
+        target:
+          type: string
+          minLength: 1
+          maxLength: 253
+          pattern: "^[A-Za-z0-9][A-Za-z0-9.:_%-]{0,252}$"
+    execution:
+      program: enum4linux
+      args: [-i, "{{target}}"]
+    policy:
+      timeout_seconds: 600
+  - metadata:
+      name: enum4linux_rid_users
+      description: Resolve principals through enum4linux's bounded default RID ranges on one authorized SMB host.
+      categories: [information-gathering]
+      tags: [smb, users, rid-cycling, anonymous]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [target]
+      properties:
+        target:
+          type: string
+          minLength: 1
+          maxLength: 253
+          pattern: "^[A-Za-z0-9][A-Za-z0-9.:_%-]{0,252}$"
+    execution:
+      program: enum4linux
+      args: [-r, "{{target}}"]
+    policy:
+      timeout_seconds: 900

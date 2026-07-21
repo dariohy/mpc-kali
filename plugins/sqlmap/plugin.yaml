@@ -3,27 +3,192 @@ kind: Plugin
 metadata:
   id: org.mcp-kali.sqlmap
   name: SQLmap
-  version: 1.0.0
-categories: [web-application]
-tags: [injection]
+  version: 2.0.0
+  description: Bounded low-risk SQL injection detection and database-metadata profiles.
+categories: [web-application, vulnerability-analysis]
+tags: [injection, sql, database]
 requires:
   commands: [sqlmap]
 tools:
   - metadata:
       name: sqlmap_parameter_test
-      description: Test an authorized URL for SQL injection behavior.
+      description: Test parameters in one authorized HTTP(S) URL or optional POST body at level 1 and risk 1 without stacked queries.
+      categories: [vulnerability-analysis, web-application]
+      tags: [sql-injection, detection, low-risk]
     input_schema:
       type: object
       additionalProperties: false
       required: [url]
       properties:
-        url: {type: string, minLength: 1, maxLength: 65536}
-        data: {type: string, minLength: 1, maxLength: 65536}
+        url: {$ref: "#/$defs/url"}
+        data: {$ref: "#/$defs/data"}
+      $defs:
+        url:
+          type: string
+          minLength: 9
+          maxLength: 2048
+          pattern: "^https?://[A-Za-z0-9\\[][A-Za-z0-9.:_%\\[\\]-]{0,252}(/[A-Za-z0-9._~!$&'()*+,;=:@%/?#-]*)?$"
+        data:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          pattern: "^[^\\r\\n]+$"
     execution:
       program: sqlmap
       args:
         - -u
         - "{{url}}"
-        - --batch
         - when: data
           args: [--data, "{{data}}"]
+        - --batch
+        - --level=1
+        - --risk=1
+        - --technique=BEUTQ
+    policy:
+      timeout_seconds: 1800
+  - metadata:
+      name: sqlmap_get_parameter_test
+      description: Test one named query parameter on an authorized HTTP(S) URL using low-risk non-stacked techniques.
+      categories: [vulnerability-analysis, web-application]
+      tags: [sql-injection, get, targeted, low-risk]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [url, parameter]
+      properties:
+        url: {$ref: "#/$defs/url"}
+        parameter: {$ref: "#/$defs/identifier"}
+      $defs:
+        url:
+          type: string
+          minLength: 9
+          maxLength: 2048
+          pattern: "^https?://[A-Za-z0-9\\[][A-Za-z0-9.:_%\\[\\]-]{0,252}(/[A-Za-z0-9._~!$&'()*+,;=:@%/?#-]*)?$"
+        identifier:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: "^[A-Za-z0-9_.-]+$"
+    execution:
+      program: sqlmap
+      args: [-u, "{{url}}", -p, "{{parameter}}", --batch, --level=1, --risk=1, --technique=BEUTQ]
+    policy:
+      timeout_seconds: 1800
+  - metadata:
+      name: sqlmap_post_parameter_test
+      description: Test one named parameter in a bounded POST body using low-risk non-stacked techniques.
+      categories: [vulnerability-analysis, web-application]
+      tags: [sql-injection, post, targeted, low-risk]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [url, data, parameter]
+      properties:
+        url: {$ref: "#/$defs/url"}
+        data:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          pattern: "^[^\\r\\n]+$"
+        parameter:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: "^[A-Za-z0-9_.-]+$"
+      $defs:
+        url:
+          type: string
+          minLength: 9
+          maxLength: 2048
+          pattern: "^https?://[A-Za-z0-9\\[][A-Za-z0-9.:_%\\[\\]-]{0,252}(/[A-Za-z0-9._~!$&'()*+,;=:@%/?#-]*)?$"
+    execution:
+      program: sqlmap
+      args: [-u, "{{url}}", --data, "{{data}}", -p, "{{parameter}}", --batch, --level=1, --risk=1, --technique=BEUTQ]
+    policy:
+      timeout_seconds: 1800
+  - metadata:
+      name: sqlmap_database_context
+      description: Confirm injection and retrieve only the DBMS banner, current database, current user, and DBA status.
+      categories: [vulnerability-analysis, web-application]
+      tags: [database, context, privileges, metadata]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [url, parameter]
+      properties:
+        url: {$ref: "#/$defs/url"}
+        parameter:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: "^[A-Za-z0-9_.-]+$"
+      $defs:
+        url:
+          type: string
+          minLength: 9
+          maxLength: 2048
+          pattern: "^https?://[A-Za-z0-9\\[][A-Za-z0-9.:_%\\[\\]-]{0,252}(/[A-Za-z0-9._~!$&'()*+,;=:@%/?#-]*)?$"
+    execution:
+      program: sqlmap
+      args: [-u, "{{url}}", -p, "{{parameter}}", --banner, --current-db, --current-user, --is-dba, --batch, --level=1, --risk=1, --technique=BEUTQ]
+    policy:
+      timeout_seconds: 1800
+  - metadata:
+      name: sqlmap_database_inventory
+      description: Enumerate database names through an already authorized injection test without retrieving table rows.
+      categories: [vulnerability-analysis, web-application]
+      tags: [database, inventory, metadata]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [url, parameter]
+      properties:
+        url: {$ref: "#/$defs/url"}
+        parameter:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: "^[A-Za-z0-9_.-]+$"
+      $defs:
+        url:
+          type: string
+          minLength: 9
+          maxLength: 2048
+          pattern: "^https?://[A-Za-z0-9\\[][A-Za-z0-9.:_%\\[\\]-]{0,252}(/[A-Za-z0-9._~!$&'()*+,;=:@%/?#-]*)?$"
+    execution:
+      program: sqlmap
+      args: [-u, "{{url}}", -p, "{{parameter}}", --dbs, --batch, --level=1, --risk=1, --technique=BEUTQ]
+    policy:
+      timeout_seconds: 1800
+  - metadata:
+      name: sqlmap_table_inventory
+      description: Enumerate table names in one explicitly selected database without retrieving columns or rows.
+      categories: [vulnerability-analysis, web-application]
+      tags: [database, tables, inventory, metadata]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [url, parameter, database]
+      properties:
+        url: {$ref: "#/$defs/url"}
+        parameter:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: "^[A-Za-z0-9_.-]+$"
+        database:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: "^[A-Za-z0-9_$.-]+$"
+      $defs:
+        url:
+          type: string
+          minLength: 9
+          maxLength: 2048
+          pattern: "^https?://[A-Za-z0-9\\[][A-Za-z0-9.:_%\\[\\]-]{0,252}(/[A-Za-z0-9._~!$&'()*+,;=:@%/?#-]*)?$"
+    execution:
+      program: sqlmap
+      args: [-u, "{{url}}", -p, "{{parameter}}", -D, "{{database}}", --tables, --batch, --level=1, --risk=1, --technique=BEUTQ]
+    policy:
+      timeout_seconds: 1800

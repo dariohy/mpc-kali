@@ -1913,6 +1913,132 @@ execution: {program: printf, args: []}
         panic!("packaged tool not found: {name}")
     }
 
+    fn packaged_input_schema(name: &str) -> Value {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("plugins");
+        for path in find_named_files(&root, "plugin.yaml") {
+            let plugin: PluginDocument = serde_yaml::from_slice(&fs::read(path).unwrap()).unwrap();
+            if let Some(tool) = plugin
+                .tools
+                .into_iter()
+                .find(|tool| tool.metadata.name == name)
+            {
+                return tool.input_schema;
+            }
+        }
+        panic!("packaged tool not found: {name}")
+    }
+
+    #[test]
+    fn nikto_profiles_require_explicit_credential_free_urls() {
+        let web = packaged_input_schema("nikto_web_scan");
+        assert!(
+            validate_arguments(
+                &web,
+                &json!({"target":"https://example.test:8443/admin/?page=1"})
+            )
+            .is_ok()
+        );
+        for target in [
+            "example.test",
+            "targets.txt",
+            "/tmp/targets",
+            "https://user:secret@example.test/",
+        ] {
+            assert!(validate_arguments(&web, &json!({"target":target})).is_err());
+        }
+
+        let https = packaged_input_schema("nikto_https_scan");
+        assert!(validate_arguments(&https, &json!({"target":"https://example.test"})).is_ok());
+        assert!(validate_arguments(&https, &json!({"target":"http://example.test"})).is_err());
+    }
+
+    #[test]
+    fn web_profiles_enforce_urls_wordlists_and_bounded_request_data() {
+        let sqlmap = packaged_input_schema("sqlmap_post_parameter_test");
+        assert!(
+            validate_arguments(
+                &sqlmap,
+                &json!({"url":"https://example.test/login", "data":"user=test", "parameter":"user"})
+            )
+            .is_ok()
+        );
+        assert!(validate_arguments(
+            &sqlmap,
+            &json!({"url":"https://example.test/login", "data":"user=test\r\nX-Test: value", "parameter":"user"})
+        )
+        .is_err());
+
+        let gobuster = packaged_input_schema("gobuster_content_discovery");
+        assert!(
+            validate_arguments(
+                &gobuster,
+                &json!({"url":"https://example.test", "wordlist":"/tmp/words"})
+            )
+            .is_ok()
+        );
+        for wordlist in ["words.txt", "-", "../words.txt"] {
+            assert!(
+                validate_arguments(
+                    &gobuster,
+                    &json!({"url":"https://example.test", "wordlist":wordlist})
+                )
+                .is_err()
+            );
+        }
+
+        let fuzz = packaged_input_schema("gobuster_fuzz_discovery");
+        assert!(
+            validate_arguments(
+                &fuzz,
+                &json!({"url":"https://example.test/api/FUZZ", "wordlist":"/tmp/words"})
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_arguments(
+                &fuzz,
+                &json!({"url":"https://example.test/api/items", "wordlist":"/tmp/words"})
+            )
+            .is_err()
+        );
+
+        let wpscan = packaged_input_schema("wpscan_web_scan");
+        assert!(validate_arguments(&wpscan, &json!({"url":"https://example.test"})).is_ok());
+        for url in ["example.test", "https://user:secret@example.test/"] {
+            assert!(validate_arguments(&wpscan, &json!({"url":url})).is_err());
+        }
+    }
+
+    #[test]
+    fn dnsrecon_profiles_bound_domains_wordlists_and_reverse_ranges() {
+        let standard = packaged_input_schema("dnsrecon_standard_enumeration");
+        assert!(validate_arguments(&standard, &json!({"domain":"example.test"})).is_ok());
+        for domain in ["-example.test", "example test", "example/test"] {
+            assert!(validate_arguments(&standard, &json!({"domain":domain})).is_err());
+        }
+
+        let brute = packaged_input_schema("dnsrecon_subdomain_bruteforce");
+        assert!(
+            validate_arguments(
+                &brute,
+                &json!({"domain":"example.test", "wordlist":"/tmp/subdomains"})
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_arguments(
+                &brute,
+                &json!({"domain":"example.test", "wordlist":"subdomains.txt"})
+            )
+            .is_err()
+        );
+
+        let reverse = packaged_input_schema("dnsrecon_reverse_lookup");
+        assert!(validate_arguments(&reverse, &json!({"cidr":"192.0.2.0/24"})).is_ok());
+        assert!(validate_arguments(&reverse, &json!({"cidr":"192.0.2.0/23"})).is_err());
+        assert!(validate_arguments(&reverse, &json!({"cidr":"192.0.2.1-192.0.2.254"})).is_err());
+    }
+
     #[test]
     fn packaged_tools_render_expected_argument_vectors() {
         let cases = [
@@ -1927,8 +2053,104 @@ execution: {program: printf, args: []}
                 vec!["nmap", "-sT", "-sV", "-p", "80,443", "host"],
             ),
             (
+                "dnsrecon_standard_enumeration",
+                json!({"domain":"example.test"}),
+                vec![
+                    "dnsrecon",
+                    "-d",
+                    "example.test",
+                    "-t",
+                    "std",
+                    "--threads",
+                    "10",
+                    "--lifetime",
+                    "5",
+                ],
+            ),
+            (
+                "dnsrecon_srv_enumeration",
+                json!({"domain":"example.test"}),
+                vec![
+                    "dnsrecon",
+                    "-d",
+                    "example.test",
+                    "-t",
+                    "srv",
+                    "--threads",
+                    "10",
+                    "--lifetime",
+                    "5",
+                ],
+            ),
+            (
+                "dnsrecon_zone_transfer_check",
+                json!({"domain":"example.test"}),
+                vec![
+                    "dnsrecon",
+                    "-d",
+                    "example.test",
+                    "-t",
+                    "axfr",
+                    "--tcp",
+                    "--lifetime",
+                    "5",
+                ],
+            ),
+            (
+                "dnsrecon_certificate_transparency",
+                json!({"domain":"example.test"}),
+                vec!["dnsrecon", "-d", "example.test", "-t", "crt"],
+            ),
+            (
+                "dnsrecon_subdomain_bruteforce",
+                json!({"domain":"example.test", "wordlist":"/tmp/subdomains"}),
+                vec![
+                    "dnsrecon",
+                    "-d",
+                    "example.test",
+                    "-t",
+                    "brt",
+                    "-D",
+                    "/tmp/subdomains",
+                    "-f",
+                    "--threads",
+                    "10",
+                    "--lifetime",
+                    "5",
+                ],
+            ),
+            (
+                "dnsrecon_reverse_lookup",
+                json!({"cidr":"192.0.2.0/24"}),
+                vec![
+                    "dnsrecon",
+                    "-t",
+                    "rvl",
+                    "-r",
+                    "192.0.2.0/24",
+                    "--threads",
+                    "10",
+                    "--lifetime",
+                    "5",
+                ],
+            ),
+            (
+                "dnsrecon_dnssec_zonewalk",
+                json!({"domain":"example.test"}),
+                vec![
+                    "dnsrecon",
+                    "-d",
+                    "example.test",
+                    "-t",
+                    "zonewalk",
+                    "--tcp",
+                    "--lifetime",
+                    "5",
+                ],
+            ),
+            (
                 "gobuster_content_discovery",
-                json!({"mode":"dir", "url":"https://example.test", "wordlist":"/tmp/words"}),
+                json!({"url":"https://example.test", "wordlist":"/tmp/words"}),
                 vec![
                     "gobuster",
                     "dir",
@@ -1936,6 +2158,98 @@ execution: {program: printf, args: []}
                     "https://example.test",
                     "-w",
                     "/tmp/words",
+                    "-t",
+                    "10",
+                    "--no-progress",
+                    "--no-color",
+                ],
+            ),
+            (
+                "gobuster_extension_discovery",
+                json!({"url":"https://example.test", "wordlist":"/tmp/words", "extensions":"php,txt"}),
+                vec![
+                    "gobuster",
+                    "dir",
+                    "-u",
+                    "https://example.test",
+                    "-w",
+                    "/tmp/words",
+                    "-x",
+                    "php,txt",
+                    "-t",
+                    "10",
+                    "--no-progress",
+                    "--no-color",
+                ],
+            ),
+            (
+                "gobuster_dns_discovery",
+                json!({"domain":"example.test", "wordlist":"/tmp/words"}),
+                vec![
+                    "gobuster",
+                    "dns",
+                    "-d",
+                    "example.test",
+                    "-w",
+                    "/tmp/words",
+                    "-i",
+                    "-t",
+                    "10",
+                    "--no-progress",
+                    "--no-color",
+                ],
+            ),
+            (
+                "gobuster_vhost_discovery",
+                json!({"url":"http://192.0.2.10", "domain":"example.test", "wordlist":"/tmp/words"}),
+                vec![
+                    "gobuster",
+                    "vhost",
+                    "-u",
+                    "http://192.0.2.10",
+                    "-w",
+                    "/tmp/words",
+                    "--append-domain",
+                    "--domain",
+                    "example.test",
+                    "-t",
+                    "10",
+                    "--no-progress",
+                    "--no-color",
+                ],
+            ),
+            (
+                "gobuster_fuzz_discovery",
+                json!({"url":"https://example.test/api/FUZZ", "wordlist":"/tmp/words"}),
+                vec![
+                    "gobuster",
+                    "fuzz",
+                    "-u",
+                    "https://example.test/api/FUZZ",
+                    "-w",
+                    "/tmp/words",
+                    "-t",
+                    "10",
+                    "--no-progress",
+                    "--no-color",
+                ],
+            ),
+            (
+                "gobuster_rate_limited_discovery",
+                json!({"url":"https://example.test", "wordlist":"/tmp/words"}),
+                vec![
+                    "gobuster",
+                    "dir",
+                    "-u",
+                    "https://example.test",
+                    "-w",
+                    "/tmp/words",
+                    "-t",
+                    "5",
+                    "--delay",
+                    "200ms",
+                    "--no-progress",
+                    "--no-color",
                 ],
             ),
             (
@@ -1946,7 +2260,99 @@ execution: {program: printf, args: []}
             (
                 "nikto_web_scan",
                 json!({"target":"https://example.test"}),
-                vec!["nikto", "-h", "https://example.test"],
+                vec![
+                    "nikto",
+                    "-host",
+                    "https://example.test",
+                    "-Tuning",
+                    "x6089c",
+                    "-nointeractive",
+                    "-ask",
+                    "no",
+                    "-nocheck",
+                ],
+            ),
+            (
+                "nikto_configuration_scan",
+                json!({"target":"https://example.test"}),
+                vec![
+                    "nikto",
+                    "-host",
+                    "https://example.test",
+                    "-Tuning",
+                    "23b",
+                    "-nointeractive",
+                    "-ask",
+                    "no",
+                    "-nocheck",
+                ],
+            ),
+            (
+                "nikto_software_scan",
+                json!({"target":"https://example.test"}),
+                vec![
+                    "nikto",
+                    "-host",
+                    "https://example.test",
+                    "-Tuning",
+                    "b",
+                    "-nointeractive",
+                    "-ask",
+                    "no",
+                    "-nocheck",
+                ],
+            ),
+            (
+                "nikto_https_scan",
+                json!({"target":"https://example.test:8443"}),
+                vec![
+                    "nikto",
+                    "-host",
+                    "https://example.test:8443",
+                    "-ssl",
+                    "-Tuning",
+                    "x6089c",
+                    "-nointeractive",
+                    "-ask",
+                    "no",
+                    "-nocheck",
+                ],
+            ),
+            (
+                "nikto_vhost_scan",
+                json!({"target":"http://192.0.2.10", "vhost":"app.example.test"}),
+                vec![
+                    "nikto",
+                    "-host",
+                    "http://192.0.2.10",
+                    "-vhost",
+                    "app.example.test",
+                    "-Tuning",
+                    "x6089c",
+                    "-nointeractive",
+                    "-ask",
+                    "no",
+                    "-nocheck",
+                ],
+            ),
+            (
+                "nikto_rate_limited_scan",
+                json!({"target":"https://example.test"}),
+                vec![
+                    "nikto",
+                    "-host",
+                    "https://example.test",
+                    "-Tuning",
+                    "x6089c",
+                    "-Pause",
+                    "1",
+                    "-maxtime",
+                    "20m",
+                    "-nointeractive",
+                    "-ask",
+                    "no",
+                    "-nocheck",
+                ],
             ),
             (
                 "sqlmap_parameter_test",
@@ -1955,9 +2361,97 @@ execution: {program: printf, args: []}
                     "sqlmap",
                     "-u",
                     "https://example.test/?id=1",
-                    "--batch",
                     "--data",
                     "id=1",
+                    "--batch",
+                    "--level=1",
+                    "--risk=1",
+                    "--technique=BEUTQ",
+                ],
+            ),
+            (
+                "sqlmap_get_parameter_test",
+                json!({"url":"https://example.test/?id=1", "parameter":"id"}),
+                vec![
+                    "sqlmap",
+                    "-u",
+                    "https://example.test/?id=1",
+                    "-p",
+                    "id",
+                    "--batch",
+                    "--level=1",
+                    "--risk=1",
+                    "--technique=BEUTQ",
+                ],
+            ),
+            (
+                "sqlmap_post_parameter_test",
+                json!({"url":"https://example.test/login", "data":"user=test", "parameter":"user"}),
+                vec![
+                    "sqlmap",
+                    "-u",
+                    "https://example.test/login",
+                    "--data",
+                    "user=test",
+                    "-p",
+                    "user",
+                    "--batch",
+                    "--level=1",
+                    "--risk=1",
+                    "--technique=BEUTQ",
+                ],
+            ),
+            (
+                "sqlmap_database_context",
+                json!({"url":"https://example.test/?id=1", "parameter":"id"}),
+                vec![
+                    "sqlmap",
+                    "-u",
+                    "https://example.test/?id=1",
+                    "-p",
+                    "id",
+                    "--banner",
+                    "--current-db",
+                    "--current-user",
+                    "--is-dba",
+                    "--batch",
+                    "--level=1",
+                    "--risk=1",
+                    "--technique=BEUTQ",
+                ],
+            ),
+            (
+                "sqlmap_database_inventory",
+                json!({"url":"https://example.test/?id=1", "parameter":"id"}),
+                vec![
+                    "sqlmap",
+                    "-u",
+                    "https://example.test/?id=1",
+                    "-p",
+                    "id",
+                    "--dbs",
+                    "--batch",
+                    "--level=1",
+                    "--risk=1",
+                    "--technique=BEUTQ",
+                ],
+            ),
+            (
+                "sqlmap_table_inventory",
+                json!({"url":"https://example.test/?id=1", "parameter":"id", "database":"appdb"}),
+                vec![
+                    "sqlmap",
+                    "-u",
+                    "https://example.test/?id=1",
+                    "-p",
+                    "id",
+                    "-D",
+                    "appdb",
+                    "--tables",
+                    "--batch",
+                    "--level=1",
+                    "--risk=1",
+                    "--technique=BEUTQ",
                 ],
             ),
             (
@@ -1988,12 +2482,172 @@ execution: {program: printf, args: []}
             (
                 "wpscan_web_scan",
                 json!({"url":"https://example.test"}),
-                vec!["wpscan", "--url", "https://example.test"],
+                vec![
+                    "wpscan",
+                    "--url",
+                    "https://example.test",
+                    "--detection-mode",
+                    "mixed",
+                    "--enumerate",
+                    "p,t,tt",
+                    "--no-update",
+                    "--no-banner",
+                    "--format",
+                    "cli-no-color",
+                ],
+            ),
+            (
+                "wpscan_passive_scan",
+                json!({"url":"https://example.test"}),
+                vec![
+                    "wpscan",
+                    "--url",
+                    "https://example.test",
+                    "--detection-mode",
+                    "passive",
+                    "--plugins-detection",
+                    "passive",
+                    "--plugins-version-detection",
+                    "passive",
+                    "--enumerate",
+                    "p,t",
+                    "--no-update",
+                    "--no-banner",
+                    "--format",
+                    "cli-no-color",
+                ],
+            ),
+            (
+                "wpscan_plugin_inventory",
+                json!({"url":"https://example.test"}),
+                vec![
+                    "wpscan",
+                    "--url",
+                    "https://example.test",
+                    "--enumerate",
+                    "p",
+                    "--plugins-detection",
+                    "mixed",
+                    "--plugins-version-detection",
+                    "mixed",
+                    "--no-update",
+                    "--no-banner",
+                    "--format",
+                    "cli-no-color",
+                ],
+            ),
+            (
+                "wpscan_theme_inventory",
+                json!({"url":"https://example.test"}),
+                vec![
+                    "wpscan",
+                    "--url",
+                    "https://example.test",
+                    "--enumerate",
+                    "t",
+                    "--no-update",
+                    "--no-banner",
+                    "--format",
+                    "cli-no-color",
+                ],
+            ),
+            (
+                "wpscan_user_enumeration",
+                json!({"url":"https://example.test"}),
+                vec![
+                    "wpscan",
+                    "--url",
+                    "https://example.test",
+                    "--enumerate",
+                    "u1-10",
+                    "--no-update",
+                    "--no-banner",
+                    "--format",
+                    "cli-no-color",
+                ],
+            ),
+            (
+                "wpscan_exposure_scan",
+                json!({"url":"https://example.test"}),
+                vec![
+                    "wpscan",
+                    "--url",
+                    "https://example.test",
+                    "--enumerate",
+                    "tt,cb,dbe",
+                    "--no-update",
+                    "--no-banner",
+                    "--format",
+                    "cli-no-color",
+                ],
+            ),
+            (
+                "wpscan_rate_limited_scan",
+                json!({"url":"https://example.test"}),
+                vec![
+                    "wpscan",
+                    "--url",
+                    "https://example.test",
+                    "--detection-mode",
+                    "mixed",
+                    "--enumerate",
+                    "p,t,tt",
+                    "--throttle",
+                    "750",
+                    "--request-timeout",
+                    "90",
+                    "--connect-timeout",
+                    "45",
+                    "--no-update",
+                    "--no-banner",
+                    "--format",
+                    "cli-no-color",
+                ],
             ),
             (
                 "enum4linux_enumerate",
                 json!({"target":"host"}),
                 vec!["enum4linux", "-a", "host"],
+            ),
+            (
+                "enum4linux_users",
+                json!({"target":"host"}),
+                vec!["enum4linux", "-U", "host"],
+            ),
+            (
+                "enum4linux_groups",
+                json!({"target":"host"}),
+                vec!["enum4linux", "-G", "host"],
+            ),
+            (
+                "enum4linux_shares",
+                json!({"target":"host"}),
+                vec!["enum4linux", "-S", "host"],
+            ),
+            (
+                "enum4linux_password_policy",
+                json!({"target":"host"}),
+                vec!["enum4linux", "-P", "host"],
+            ),
+            (
+                "enum4linux_os_info",
+                json!({"target":"host"}),
+                vec!["enum4linux", "-o", "host"],
+            ),
+            (
+                "enum4linux_netbios_info",
+                json!({"target":"host"}),
+                vec!["enum4linux", "-n", "host"],
+            ),
+            (
+                "enum4linux_printers",
+                json!({"target":"host"}),
+                vec!["enum4linux", "-i", "host"],
+            ),
+            (
+                "enum4linux_rid_users",
+                json!({"target":"host"}),
+                vec!["enum4linux", "-r", "host"],
             ),
         ];
         for (name, arguments, expected) in cases {

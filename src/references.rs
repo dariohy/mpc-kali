@@ -624,6 +624,9 @@ mod tests {
             "{:#?}",
             registry.diagnostics()
         );
-        assert_eq!(registry.summaries().len(), 3);
+        assert_eq!(
+            registry.summaries().len(),
+            find_reference_files(&root.join("plugins")).len()
+        );
     }
 }

@@ -1,0 +1,170 @@
+apiVersion: mcp-kali/v1
+kind: Plugin
+metadata:
+  id: org.mcp-kali.dnsrecon
+  name: DNSRecon
+  version: 1.0.0
+  description: Bounded DNS record, transfer, subdomain, reverse, CT, and DNSSEC discovery profiles.
+categories: [information-gathering]
+tags: [dns, reconnaissance, subdomains, dnssec]
+requires:
+  commands: [dnsrecon]
+tools:
+  - metadata:
+      name: dnsrecon_standard_enumeration
+      description: Enumerate core DNS records for one authorized domain with a fixed query budget.
+      categories: [information-gathering]
+      tags: [dns, soa, ns, mx, address-records]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [domain]
+      properties:
+        domain: {$ref: "#/$defs/domain"}
+      $defs:
+        domain:
+          type: string
+          minLength: 1
+          maxLength: 253
+          pattern: "^[A-Za-z0-9][A-Za-z0-9.-]{0,251}[A-Za-z0-9]$"
+    execution:
+      program: dnsrecon
+      args: [-d, "{{domain}}", -t, std, --threads, "10", --lifetime, "5"]
+    policy:
+      timeout_seconds: 900
+  - metadata:
+      name: dnsrecon_srv_enumeration
+      description: Enumerate common SRV service records beneath one authorized domain.
+      categories: [information-gathering]
+      tags: [dns, srv, services]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [domain]
+      properties:
+        domain: {$ref: "#/$defs/domain"}
+      $defs:
+        domain:
+          type: string
+          minLength: 1
+          maxLength: 253
+          pattern: "^[A-Za-z0-9][A-Za-z0-9.-]{0,251}[A-Za-z0-9]$"
+    execution:
+      program: dnsrecon
+      args: [-d, "{{domain}}", -t, srv, --threads, "10", --lifetime, "5"]
+    policy:
+      timeout_seconds: 900
+  - metadata:
+      name: dnsrecon_zone_transfer_check
+      description: Test each authoritative name server for an authorized domain for AXFR exposure over TCP.
+      categories: [vulnerability-analysis, information-gathering]
+      tags: [dns, axfr, zone-transfer, configuration]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [domain]
+      properties:
+        domain: {$ref: "#/$defs/domain"}
+      $defs:
+        domain:
+          type: string
+          minLength: 1
+          maxLength: 253
+          pattern: "^[A-Za-z0-9][A-Za-z0-9.-]{0,251}[A-Za-z0-9]$"
+    execution:
+      program: dnsrecon
+      args: [-d, "{{domain}}", -t, axfr, --tcp, --lifetime, "5"]
+    policy:
+      timeout_seconds: 900
+  - metadata:
+      name: dnsrecon_certificate_transparency
+      description: Query certificate-transparency data for names beneath one authorized domain.
+      categories: [information-gathering]
+      tags: [dns, subdomains, certificate-transparency, osint]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [domain]
+      properties:
+        domain: {$ref: "#/$defs/domain"}
+      $defs:
+        domain:
+          type: string
+          minLength: 1
+          maxLength: 253
+          pattern: "^[A-Za-z0-9][A-Za-z0-9.-]{0,251}[A-Za-z0-9]$"
+    execution:
+      program: dnsrecon
+      args: [-d, "{{domain}}", -t, crt]
+    policy:
+      timeout_seconds: 900
+  - metadata:
+      name: dnsrecon_subdomain_bruteforce
+      description: Resolve candidates beneath one authorized domain from an absolute wordlist while filtering wildcard-address matches.
+      categories: [information-gathering]
+      tags: [dns, subdomains, wordlist, wildcard-filter]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [domain, wordlist]
+      properties:
+        domain: {$ref: "#/$defs/domain"}
+        wordlist: {$ref: "#/$defs/wordlist"}
+      $defs:
+        domain:
+          type: string
+          minLength: 1
+          maxLength: 253
+          pattern: "^[A-Za-z0-9][A-Za-z0-9.-]{0,251}[A-Za-z0-9]$"
+        wordlist:
+          type: string
+          minLength: 2
+          maxLength: 4096
+          pattern: "^/[^\\r\\n]+$"
+    execution:
+      program: dnsrecon
+      args: [-d, "{{domain}}", -t, brt, -D, "{{wordlist}}", -f, --threads, "10", --lifetime, "5"]
+    policy:
+      timeout_seconds: 1800
+  - metadata:
+      name: dnsrecon_reverse_lookup
+      description: Enumerate PTR records within one explicitly authorized IPv4 CIDR no broader than /24.
+      categories: [information-gathering]
+      tags: [dns, ptr, reverse-lookup, bounded-range]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [cidr]
+      properties:
+        cidr:
+          type: string
+          minLength: 9
+          maxLength: 18
+          pattern: "^[0-9]{1,3}(\\.[0-9]{1,3}){3}/(2[4-9]|3[0-2])$"
+    execution:
+      program: dnsrecon
+      args: [-t, rvl, -r, "{{cidr}}", --threads, "10", --lifetime, "5"]
+    policy:
+      timeout_seconds: 1800
+  - metadata:
+      name: dnsrecon_dnssec_zonewalk
+      description: Attempt an NSEC DNSSEC zone walk for one explicitly authorized domain.
+      categories: [information-gathering]
+      tags: [dns, dnssec, nsec, zonewalk]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [domain]
+      properties:
+        domain: {$ref: "#/$defs/domain"}
+      $defs:
+        domain:
+          type: string
+          minLength: 1
+          maxLength: 253
+          pattern: "^[A-Za-z0-9][A-Za-z0-9.-]{0,251}[A-Za-z0-9]$"
+    execution:
+      program: dnsrecon
+      args: [-d, "{{domain}}", -t, zonewalk, --tcp, --lifetime, "5"]
+    policy:
+      timeout_seconds: 1800

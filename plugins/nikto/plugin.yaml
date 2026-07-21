@@ -3,20 +3,137 @@ kind: Plugin
 metadata:
   id: org.mcp-kali.nikto
   name: Nikto
-  version: 1.0.0
+  version: 2.0.0
+  description: Safe, repeatable Nikto web-server assessment profiles with non-destructive tuning.
 categories: [vulnerability-analysis, web-application]
+tags: [http, https, web-server, configuration]
 requires:
   commands: [nikto]
 tools:
   - metadata:
       name: nikto_web_scan
-      description: Run a Nikto assessment against an authorized web target.
+      description: Run broad Nikto coverage against one authorized HTTP(S) URL while excluding disruptive check categories.
+      categories: [vulnerability-analysis, web-application]
+      tags: [web-server, broad, non-destructive]
     input_schema:
       type: object
       additionalProperties: false
       required: [target]
       properties:
-        target: {type: string, minLength: 1, maxLength: 65536}
+        target: {$ref: "#/$defs/url"}
+      $defs:
+        url:
+          type: string
+          minLength: 9
+          maxLength: 2048
+          pattern: "^https?://[A-Za-z0-9\\[][A-Za-z0-9.:_%\\[\\]-]{0,252}(/[A-Za-z0-9._~!$&'()*+,;=:@%/?#-]*)?$"
     execution:
       program: nikto
-      args: [-h, "{{target}}"]
+      args: [-host, "{{target}}", -Tuning, x6089c, -nointeractive, -ask, "no", -nocheck]
+    policy:
+      timeout_seconds: 1800
+  - metadata:
+      name: nikto_configuration_scan
+      description: Check one authorized HTTP(S) URL for common misconfiguration, information disclosure, and software identification issues.
+      categories: [vulnerability-analysis, web-application]
+      tags: [misconfiguration, information-disclosure, software]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [target]
+      properties:
+        target:
+          type: string
+          minLength: 9
+          maxLength: 2048
+          pattern: "^https?://[A-Za-z0-9\\[][A-Za-z0-9.:_%\\[\\]-]{0,252}(/[A-Za-z0-9._~!$&'()*+,;=:@%/?#-]*)?$"
+    execution:
+      program: nikto
+      args: [-host, "{{target}}", -Tuning, 23b, -nointeractive, -ask, "no", -nocheck]
+    policy:
+      timeout_seconds: 1200
+  - metadata:
+      name: nikto_software_scan
+      description: Identify web-server software and version indicators on one authorized HTTP(S) URL.
+      categories: [information-gathering, web-application]
+      tags: [software, versions, inventory]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [target]
+      properties:
+        target:
+          type: string
+          minLength: 9
+          maxLength: 2048
+          pattern: "^https?://[A-Za-z0-9\\[][A-Za-z0-9.:_%\\[\\]-]{0,252}(/[A-Za-z0-9._~!$&'()*+,;=:@%/?#-]*)?$"
+    execution:
+      program: nikto
+      args: [-host, "{{target}}", -Tuning, b, -nointeractive, -ask, "no", -nocheck]
+    policy:
+      timeout_seconds: 900
+  - metadata:
+      name: nikto_https_scan
+      description: Run broad non-destructive Nikto coverage against one explicit authorized HTTPS URL, including non-standard ports.
+      categories: [vulnerability-analysis, web-application]
+      tags: [https, tls, web-server, non-destructive]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [target]
+      properties:
+        target:
+          type: string
+          minLength: 10
+          maxLength: 2048
+          pattern: "^https://[A-Za-z0-9\\[][A-Za-z0-9.:_%\\[\\]-]{0,252}(/[A-Za-z0-9._~!$&'()*+,;=:@%/?#-]*)?$"
+    execution:
+      program: nikto
+      args: [-host, "{{target}}", -ssl, -Tuning, x6089c, -nointeractive, -ask, "no", -nocheck]
+    policy:
+      timeout_seconds: 1800
+  - metadata:
+      name: nikto_vhost_scan
+      description: Assess one authorized named virtual host through an explicit HTTP(S) connection URL.
+      categories: [vulnerability-analysis, web-application]
+      tags: [virtual-host, host-header, non-destructive]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [target, vhost]
+      properties:
+        target:
+          type: string
+          minLength: 9
+          maxLength: 2048
+          pattern: "^https?://[A-Za-z0-9\\[][A-Za-z0-9.:_%\\[\\]-]{0,252}(/[A-Za-z0-9._~!$&'()*+,;=:@%/?#-]*)?$"
+        vhost:
+          type: string
+          minLength: 1
+          maxLength: 253
+          pattern: "^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$"
+    execution:
+      program: nikto
+      args: [-host, "{{target}}", -vhost, "{{vhost}}", -Tuning, x6089c, -nointeractive, -ask, "no", -nocheck]
+    policy:
+      timeout_seconds: 1800
+  - metadata:
+      name: nikto_rate_limited_scan
+      description: Run a broad non-destructive Nikto assessment with a one-second pause and a twenty-minute per-host limit.
+      categories: [vulnerability-analysis, web-application]
+      tags: [rate-limited, time-boxed, production, non-destructive]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [target]
+      properties:
+        target:
+          type: string
+          minLength: 9
+          maxLength: 2048
+          pattern: "^https?://[A-Za-z0-9\\[][A-Za-z0-9.:_%\\[\\]-]{0,252}(/[A-Za-z0-9._~!$&'()*+,;=:@%/?#-]*)?$"
+    execution:
+      program: nikto
+      args: [-host, "{{target}}", -Tuning, x6089c, -Pause, "1", -maxtime, 20m, -nointeractive, -ask, "no", -nocheck]
+    policy:
+      timeout_seconds: 1500

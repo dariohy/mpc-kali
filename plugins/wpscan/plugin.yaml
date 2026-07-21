@@ -3,20 +3,164 @@ kind: Plugin
 metadata:
   id: org.mcp-kali.wpscan
   name: WPScan
-  version: 1.0.0
+  version: 2.0.0
+  description: Repeatable token-free WordPress fingerprinting and bounded inventory profiles.
 categories: [web-application, vulnerability-analysis]
+tags: [wordpress, cms, plugins, themes]
 requires:
   commands: [wpscan]
 tools:
   - metadata:
       name: wpscan_web_scan
-      description: Assess an authorized WordPress site.
+      description: Fingerprint one authorized WordPress URL with mixed detection and explicit bounded enumeration.
+      categories: [web-application, vulnerability-analysis]
+      tags: [wordpress, baseline, fingerprinting]
     input_schema:
       type: object
       additionalProperties: false
       required: [url]
       properties:
-        url: {type: string, minLength: 1, maxLength: 65536}
+        url: {$ref: "#/$defs/url"}
+      $defs:
+        url:
+          type: string
+          minLength: 9
+          maxLength: 2048
+          pattern: "^https?://[A-Za-z0-9\\[][A-Za-z0-9.:_%\\[\\]-]{0,252}(/[A-Za-z0-9._~!$&'()*+,;=:@%/?#-]*)?$"
     execution:
       program: wpscan
-      args: [--url, "{{url}}"]
+      args: [--url, "{{url}}", --detection-mode, mixed, --enumerate, "p,t,tt", --no-update, --no-banner, --format, cli-no-color]
+    policy:
+      timeout_seconds: 1800
+  - metadata:
+      name: wpscan_passive_scan
+      description: Collect WordPress indicators using passive core, plugin, and version detection on one authorized URL.
+      categories: [information-gathering, web-application]
+      tags: [wordpress, passive, fingerprinting]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [url]
+      properties:
+        url: {$ref: "#/$defs/url"}
+      $defs:
+        url:
+          type: string
+          minLength: 9
+          maxLength: 2048
+          pattern: "^https?://[A-Za-z0-9\\[][A-Za-z0-9.:_%\\[\\]-]{0,252}(/[A-Za-z0-9._~!$&'()*+,;=:@%/?#-]*)?$"
+    execution:
+      program: wpscan
+      args: [--url, "{{url}}", --detection-mode, passive, --plugins-detection, passive, --plugins-version-detection, passive, --enumerate, "p,t", --no-update, --no-banner, --format, cli-no-color]
+    policy:
+      timeout_seconds: 1200
+  - metadata:
+      name: wpscan_plugin_inventory
+      description: Enumerate popular WordPress plugins with mixed version detection without vulnerability API annotations.
+      categories: [information-gathering, web-application]
+      tags: [wordpress, plugins, inventory, versions]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [url]
+      properties:
+        url: {$ref: "#/$defs/url"}
+      $defs:
+        url:
+          type: string
+          minLength: 9
+          maxLength: 2048
+          pattern: "^https?://[A-Za-z0-9\\[][A-Za-z0-9.:_%\\[\\]-]{0,252}(/[A-Za-z0-9._~!$&'()*+,;=:@%/?#-]*)?$"
+    execution:
+      program: wpscan
+      args: [--url, "{{url}}", --enumerate, p, --plugins-detection, mixed, --plugins-version-detection, mixed, --no-update, --no-banner, --format, cli-no-color]
+    policy:
+      timeout_seconds: 1800
+  - metadata:
+      name: wpscan_theme_inventory
+      description: Enumerate popular WordPress themes and version indicators without vulnerability API annotations.
+      categories: [information-gathering, web-application]
+      tags: [wordpress, themes, inventory, versions]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [url]
+      properties:
+        url: {$ref: "#/$defs/url"}
+      $defs:
+        url:
+          type: string
+          minLength: 9
+          maxLength: 2048
+          pattern: "^https?://[A-Za-z0-9\\[][A-Za-z0-9.:_%\\[\\]-]{0,252}(/[A-Za-z0-9._~!$&'()*+,;=:@%/?#-]*)?$"
+    execution:
+      program: wpscan
+      args: [--url, "{{url}}", --enumerate, t, --no-update, --no-banner, --format, cli-no-color]
+    policy:
+      timeout_seconds: 1800
+  - metadata:
+      name: wpscan_user_enumeration
+      description: Enumerate only WordPress user IDs 1 through 10 on one authorized URL.
+      categories: [information-gathering, web-application]
+      tags: [wordpress, users, bounded]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [url]
+      properties:
+        url: {$ref: "#/$defs/url"}
+      $defs:
+        url:
+          type: string
+          minLength: 9
+          maxLength: 2048
+          pattern: "^https?://[A-Za-z0-9\\[][A-Za-z0-9.:_%\\[\\]-]{0,252}(/[A-Za-z0-9._~!$&'()*+,;=:@%/?#-]*)?$"
+    execution:
+      program: wpscan
+      args: [--url, "{{url}}", --enumerate, u1-10, --no-update, --no-banner, --format, cli-no-color]
+    policy:
+      timeout_seconds: 1200
+  - metadata:
+      name: wpscan_exposure_scan
+      description: Check one authorized WordPress URL for TimThumb artifacts, configuration backups, and database exports.
+      categories: [vulnerability-analysis, web-application]
+      tags: [wordpress, backups, database-exports, exposure]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [url]
+      properties:
+        url: {$ref: "#/$defs/url"}
+      $defs:
+        url:
+          type: string
+          minLength: 9
+          maxLength: 2048
+          pattern: "^https?://[A-Za-z0-9\\[][A-Za-z0-9.:_%\\[\\]-]{0,252}(/[A-Za-z0-9._~!$&'()*+,;=:@%/?#-]*)?$"
+    execution:
+      program: wpscan
+      args: [--url, "{{url}}", --enumerate, "tt,cb,dbe", --no-update, --no-banner, --format, cli-no-color]
+    policy:
+      timeout_seconds: 1800
+  - metadata:
+      name: wpscan_rate_limited_scan
+      description: Run bounded WordPress inventory serially with a 750 ms delay and extended connection timeouts.
+      categories: [web-application, vulnerability-analysis]
+      tags: [wordpress, rate-limited, production]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [url]
+      properties:
+        url: {$ref: "#/$defs/url"}
+      $defs:
+        url:
+          type: string
+          minLength: 9
+          maxLength: 2048
+          pattern: "^https?://[A-Za-z0-9\\[][A-Za-z0-9.:_%\\[\\]-]{0,252}(/[A-Za-z0-9._~!$&'()*+,;=:@%/?#-]*)?$"
+    execution:
+      program: wpscan
+      args: [--url, "{{url}}", --detection-mode, mixed, --enumerate, "p,t,tt", --throttle, "750", --request-timeout, "90", --connect-timeout, "45", --no-update, --no-banner, --format, cli-no-color]
+    policy:
+      timeout_seconds: 3600
