@@ -5,7 +5,7 @@ public from creating a software release.
 
 ## Current release model
 
-- Tag `v2.2.1` identifies the current stable release; 2.1.0 was withdrawn.
+- Tag `v2.3.0` identifies the current stable release; 2.1.0 was withdrawn.
 - Release tags are immutable. Do not move or recreate them.
 - Create or announce a new development branch before beginning the next release
   line.

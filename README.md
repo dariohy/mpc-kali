@@ -1,4 +1,4 @@
-# MCP Kali 2.2.1
+# MCP Kali 2.3.0
 
 [![CI](https://github.com/dariohy/mcp-kali/actions/workflows/ci.yml/badge.svg)](https://github.com/dariohy/mcp-kali/actions/workflows/ci.yml)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
@@ -11,7 +11,7 @@ to an MCP host and returns job IDs immediately.
 
 Use MCP Kali only on systems and targets you are explicitly authorized to test.
 
-**Project status:** `v2.2.1` is the current stable release. Version 2.1.0 was
+**Project status:** `v2.3.0` is the current stable release. Version 2.1.0 was
 withdrawn because of system-installation and sudo-readiness defects.
 
 ## Contents

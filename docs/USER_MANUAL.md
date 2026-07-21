@@ -1,8 +1,8 @@
-# MCP Kali 2.2.1 User Manual
+# MCP Kali 2.3.0 User Manual
 
 This manual describes installation, configuration, MCP integration, job
 operation, HTTP APIs, security boundaries, maintenance, and troubleshooting for
-MCP Kali 2.2.1.
+MCP Kali 2.3.0.
 
 MCP Kali is a pentesting orchestration tool. Run it only against systems for
 which you have explicit authorization.
@@ -263,7 +263,7 @@ mcp-kali --version
 mcp-kali-bridge --version
 ```
 
-Both must report `2.2.1`.
+Both must report `2.3.0`.
 
 ## 5. Configuration
 
@@ -959,7 +959,7 @@ written up to the time of the request. A later download may therefore be longer.
 
 ## 10. HTTP API reference
 
-The API has no version prefix in 2.2.1. Bind it only to a protected interface.
+The API has no version prefix in 2.3.0. Bind it only to a protected interface.
 
 ### Health
 
@@ -971,10 +971,10 @@ Example response:
 {
   "status": "healthy",
   "service": "mcp-kali",
-  "version": "2.2.1",
+  "version": "2.3.0",
   "queued": 0,
   "running": 1,
-  "max_concurrency": 2
+  "max_concurrency": 4
 }
 ```
 
@@ -1343,7 +1343,7 @@ sensitive even when reveal mode is off.
 
 ### Network controls
 
-Version 2.2.1 has no built-in user authentication, authorization, or TLS server.
+Version 2.3.0 has no built-in user authentication, authorization, or TLS server.
 Default controls are:
 
 - loopback server bind;
@@ -1569,7 +1569,7 @@ MCP `serverInfo.version` plus `/health.version` use `CARGO_PKG_VERSION`.
 
 ### Pre-1.0 development snapshots
 
-Version 1.0.0 introduced several boundaries that remain in 2.2.1 and may require integration
+Version 1.0.0 introduced several boundaries that remain in 2.3.0 and may require integration
 updates:
 
 - binaries are split into client and server;
