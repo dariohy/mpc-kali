@@ -261,8 +261,8 @@ not accept the prior `--env-file` / `MCP_KALI_ENV_FILE` selectors.
 | `MCP_KALI_DISABLE_EXECUTE_COMMAND` | Server | `false` | Remove the privileged free-execution tool |
 | `MCP_KALI_PRIVILEGE_ELEVATION` | Server | `auto` | `auto` uses `sudo -n` for declarative root-required tools unless already root; `none` runs them directly |
 | `MCP_KALI_ALLOW_REMOTE_BIND` | Server | `false` | Acknowledge an unauthenticated non-loopback bind |
-| `MCP_KALI_SERVER` | Client | `http://127.0.0.1:5000` | Server origin URL |
-| `MCP_KALI_ALLOW_INSECURE_HTTP` | Client | `false` | Permit HTTP to a non-loopback server |
+| `MCP_KALI_BRIDGE_SERVER` | Client | `http://127.0.0.1:5000` | Server origin URL |
+| `MCP_KALI_BRIDGE_ALLOW_INSECURE_HTTP` | Client | `false` | Permit HTTP to a non-loopback server |
 
 Local state created by earlier releases remains at `~/.mcp-kali/var/jobs` and
 is not moved automatically. To retain access to it, either set

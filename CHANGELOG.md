@@ -14,6 +14,9 @@ All notable changes to MCP Kali are documented here. The project follows
 
 ### Changed
 
+- Namespace bridge-only configuration as `MCP_KALI_BRIDGE_SERVER` and
+  `MCP_KALI_BRIDGE_ALLOW_INSECURE_HTTP`; the previous names remain migration
+  aliases when the new names are unset.
 - Restrict HTTP tracing to method, path, status, and latency metadata while
   keeping request bodies, query strings, command data, and job output out of
   service logs.

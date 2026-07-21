@@ -381,8 +381,12 @@ by a later `NOPASSWD` rule.
 
 | Environment variable | CLI flag | Default | Validation |
 |---|---|---|---|
-| `MCP_KALI_SERVER` | `--server` | `http://127.0.0.1:5000` | HTTP(S) origin URL, no credentials/query/fragment/path |
-| `MCP_KALI_ALLOW_INSECURE_HTTP` | `--allow-insecure-http` | `false` | Boolean acknowledgement |
+| `MCP_KALI_BRIDGE_SERVER` | `--server` | `http://127.0.0.1:5000` | HTTP(S) origin URL, no credentials/query/fragment/path |
+| `MCP_KALI_BRIDGE_ALLOW_INSECURE_HTTP` | `--allow-insecure-http` | `false` | Boolean acknowledgement |
+
+`MCP_KALI_SERVER` and `MCP_KALI_ALLOW_INSECURE_HTTP` remain supported as
+compatibility aliases when the corresponding `MCP_KALI_BRIDGE_*` variable is
+unset.
 
 Plain HTTP is accepted automatically for loopback addresses. Non-loopback HTTP
 is rejected unless the insecure override is explicit.

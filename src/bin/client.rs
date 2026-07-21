@@ -2,7 +2,7 @@ use anyhow::{Result, bail};
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{Shell, generate};
 use reqwest::Url;
-use std::{net::IpAddr, path::PathBuf};
+use std::{env, net::IpAddr, path::PathBuf};
 use tracing_subscriber::EnvFilter;
 
 /// Local stdio MCP bridge that talks to an mcp-kali instance.
@@ -18,12 +18,20 @@ struct Cli {
     config_file: Option<PathBuf>,
 
     /// Base URL of the Kali-side mcp-kali API.
-    #[arg(long, env = "MCP_KALI_SERVER", default_value = "http://127.0.0.1:5000")]
+    #[arg(
+        long,
+        env = "MCP_KALI_BRIDGE_SERVER",
+        default_value = "http://127.0.0.1:5000"
+    )]
     server: Url,
 
     /// Permit cleartext HTTP to a non-loopback server. Prefer HTTPS or an SSH
     /// tunnel because job commands and output may be sensitive.
-    #[arg(long, env = "MCP_KALI_ALLOW_INSECURE_HTTP", default_value_t = false)]
+    #[arg(
+        long,
+        env = "MCP_KALI_BRIDGE_ALLOW_INSECURE_HTTP",
+        default_value_t = false
+    )]
     allow_insecure_http: bool,
 
     #[command(subcommand)]
@@ -40,6 +48,7 @@ enum Commands {
 #[tokio::main]
 async fn main() -> Result<()> {
     mcp_kali::config::load_config_file()?;
+    migrate_legacy_bridge_environment();
     let cli = Cli::parse();
     let _ = &cli.config_file;
     if let Some(Commands::Completions { shell }) = cli.command {
@@ -59,6 +68,27 @@ async fn main() -> Result<()> {
         .with_writer(std::io::stderr)
         .init();
     mcp_kali::mcp::run(cli.server).await
+}
+
+/// Keeps the previous bridge-only names working for existing configurations.
+/// This runs before Clap parses arguments and before this single-threaded
+/// process starts the async runtime.
+fn migrate_legacy_bridge_environment() {
+    migrate_legacy_environment("MCP_KALI_SERVER", "MCP_KALI_BRIDGE_SERVER");
+    migrate_legacy_environment(
+        "MCP_KALI_ALLOW_INSECURE_HTTP",
+        "MCP_KALI_BRIDGE_ALLOW_INSECURE_HTTP",
+    );
+}
+
+fn migrate_legacy_environment(legacy: &str, canonical: &str) {
+    if env::var_os(canonical).is_none()
+        && let Some(value) = env::var_os(legacy)
+    {
+        // SAFETY: called during single-threaded startup before the Tokio
+        // runtime or any application threads are created.
+        unsafe { env::set_var(canonical, value) };
+    }
 }
 
 fn validate_server_url(server: &Url, allow_insecure_http: bool) -> Result<()> {
