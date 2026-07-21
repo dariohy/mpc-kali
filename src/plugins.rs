@@ -1,4 +1,8 @@
-use crate::{jobs::Scheduler, models::SubmitJob};
+use crate::{
+    jobs::Scheduler,
+    models::SubmitJob,
+    references::{ReferenceDiagnostic, ReferenceDocument, ReferenceRegistry, ReferenceSummary},
+};
 use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -108,6 +112,7 @@ pub struct PluginRegistry {
     tools: BTreeMap<String, RegisteredTool>,
     capabilities: Vec<CapabilityStatus>,
     diagnostics: Vec<PluginDiagnostic>,
+    references: ReferenceRegistry,
     privilege: PrivilegeRuntime,
 }
 
@@ -290,6 +295,7 @@ impl PluginRegistry {
             tools: BTreeMap::new(),
             capabilities: Vec::new(),
             diagnostics: Vec::new(),
+            references: ReferenceRegistry::default(),
             privilege: PrivilegeRuntime {
                 elevation: privilege_elevation,
                 is_root: running_as_root(),
@@ -316,6 +322,24 @@ impl PluginRegistry {
             );
         }
         registry.resolve_capabilities(catalog);
+        let plugin_ids = registry.plugins.keys().cloned().collect();
+        let tool_owners = registry
+            .tools
+            .iter()
+            .map(|(name, tool)| (name.clone(), tool.plugin_id.clone()))
+            .collect();
+        let capability_ids = registry
+            .capabilities
+            .iter()
+            .map(|capability| capability.id.clone())
+            .collect();
+        registry.references = ReferenceRegistry::load(
+            system_data_dir,
+            config_dir,
+            &plugin_ids,
+            &tool_owners,
+            &capability_ids,
+        );
         registry.refresh_sudo_authorizations();
         registry
     }
@@ -373,6 +397,18 @@ impl PluginRegistry {
 
     pub fn diagnostics(&self) -> &[PluginDiagnostic] {
         &self.diagnostics
+    }
+
+    pub fn references(&self) -> Vec<ReferenceSummary> {
+        self.references.summaries()
+    }
+
+    pub fn reference(&self, id: &str) -> Option<ReferenceDocument> {
+        self.references.get(id)
+    }
+
+    pub fn reference_diagnostics(&self) -> &[ReferenceDiagnostic] {
+        self.references.diagnostics()
     }
 
     pub fn has_tool(&self, name: &str) -> bool {
@@ -1566,6 +1602,7 @@ tools:
             tools: BTreeMap::new(),
             capabilities: Vec::new(),
             diagnostics: Vec::new(),
+            references: ReferenceRegistry::default(),
             privilege: PrivilegeRuntime {
                 elevation: PrivilegeElevation::Auto,
                 is_root: false,
@@ -1624,6 +1661,7 @@ tools:
             tools: BTreeMap::new(),
             capabilities: Vec::new(),
             diagnostics: Vec::new(),
+            references: ReferenceRegistry::default(),
             privilege: PrivilegeRuntime {
                 elevation: PrivilegeElevation::None,
                 is_root: false,
@@ -1661,6 +1699,7 @@ tools:
             tools: BTreeMap::new(),
             capabilities: Vec::new(),
             diagnostics: Vec::new(),
+            references: ReferenceRegistry::default(),
             privilege: PrivilegeRuntime {
                 elevation: PrivilegeElevation::Auto,
                 is_root: false,
@@ -1885,7 +1924,7 @@ execution: {program: printf, args: []}
             (
                 "nmap_service_scan",
                 json!({"target":"host", "ports":"80,443"}),
-                vec!["nmap", "-sV", "-p", "80,443", "host"],
+                vec!["nmap", "-sT", "-sV", "-p", "80,443", "host"],
             ),
             (
                 "gobuster_content_discovery",

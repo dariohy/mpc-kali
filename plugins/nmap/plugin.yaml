@@ -3,45 +3,225 @@ kind: Plugin
 metadata:
   id: org.mcp-kali.nmap
   name: Nmap
-  version: 1.0.0
-  description: Declarative Nmap host and service discovery.
+  version: 2.0.0
+  description: Safe, repeatable Nmap discovery, inventory, and configuration-audit profiles.
 categories: [information-gathering]
-tags: [network, discovery]
+tags: [network, discovery, inventory]
 requires:
   commands: [nmap]
 tools:
   - metadata:
       name: nmap_host_discovery
-      description: Discover responsive systems in an authorized target range using Nmap's privileged discovery probes.
+      description: Discover responsive systems in an authorized target using Nmap without scanning ports.
+      categories: [information-gathering]
+      tags: [hosts, discovery]
     input_schema:
       type: object
       additionalProperties: false
       required: [target]
       properties:
-        target: {type: string, minLength: 1, maxLength: 65536}
+        target: {$ref: "#/$defs/target"}
+      $defs:
+        target:
+          type: string
+          minLength: 1
+          maxLength: 253
+          pattern: "^[A-Za-z0-9][A-Za-z0-9.:_/%-]{0,252}$"
     execution:
       program: nmap
       args: [-sn, "{{target}}"]
-    requirements:
-      privilege: root
+    policy:
+      timeout_seconds: 600
   - metadata:
-      name: nmap_service_scan
-      description: Detect services and versions on an authorized target.
+      name: nmap_arp_host_discovery
+      description: Discover hosts on an authorized local network using explicit ARP probes.
       categories: [information-gathering]
-      tags: [services]
+      tags: [hosts, arp, local-network]
     input_schema:
       type: object
       additionalProperties: false
       required: [target]
       properties:
-        target: {type: string, minLength: 1, maxLength: 65536}
-        ports: {type: string, minLength: 1, maxLength: 65536}
+        target:
+          type: string
+          minLength: 1
+          maxLength: 253
+          pattern: "^[A-Za-z0-9][A-Za-z0-9.:_/%-]{0,252}$"
+    execution:
+      program: nmap
+      args: [-sn, -PR, "{{target}}"]
+    requirements:
+      privilege: root
+    policy:
+      timeout_seconds: 600
+  - metadata:
+      name: nmap_service_scan
+      description: Use TCP connect scanning to identify open ports, services, and versions on an authorized target.
+      categories: [information-gathering]
+      tags: [tcp, services, versions]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [target]
+      properties:
+        target:
+          type: string
+          minLength: 1
+          maxLength: 253
+          pattern: "^[A-Za-z0-9][A-Za-z0-9.:_/%-]{0,252}$"
+        ports:
+          type: string
+          minLength: 1
+          maxLength: 256
+          pattern: '^[0-9]{1,5}(-[0-9]{1,5})?(,[0-9]{1,5}(-[0-9]{1,5})?)*$'
     execution:
       program: nmap
       args:
+        - -sT
         - -sV
         - when: ports
           args: [-p, "{{ports}}"]
         - "{{target}}"
+    policy:
+      timeout_seconds: 1800
+  - metadata:
+      name: nmap_syn_service_scan
+      description: Use privileged TCP SYN scanning to identify open ports, services, and versions on an authorized target.
+      categories: [information-gathering]
+      tags: [tcp, syn, services, versions]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [target]
+      properties:
+        target:
+          type: string
+          minLength: 1
+          maxLength: 253
+          pattern: "^[A-Za-z0-9][A-Za-z0-9.:_/%-]{0,252}$"
+        ports:
+          type: string
+          minLength: 1
+          maxLength: 256
+          pattern: '^[0-9]{1,5}(-[0-9]{1,5})?(,[0-9]{1,5}(-[0-9]{1,5})?)*$'
+    execution:
+      program: nmap
+      args:
+        - -sS
+        - -sV
+        - when: ports
+          args: [-p, "{{ports}}"]
+        - "{{target}}"
+    requirements:
+      privilege: root
+    policy:
+      timeout_seconds: 1800
+  - metadata:
+      name: nmap_udp_service_scan
+      description: Probe an explicit UDP port set and identify services on an authorized target.
+      categories: [information-gathering]
+      tags: [udp, services, versions]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [target, ports]
+      properties:
+        target:
+          type: string
+          minLength: 1
+          maxLength: 253
+          pattern: "^[A-Za-z0-9][A-Za-z0-9.:_/%-]{0,252}$"
+        ports:
+          type: string
+          minLength: 1
+          maxLength: 256
+          pattern: '^[0-9]{1,5}(-[0-9]{1,5})?(,[0-9]{1,5}(-[0-9]{1,5})?)*$'
+    execution:
+      program: nmap
+      args: [-sU, -sV, -p, "{{ports}}", "{{target}}"]
+    requirements:
+      privilege: root
+    policy:
+      timeout_seconds: 3600
+  - metadata:
+      name: nmap_os_detection
+      description: Fingerprint the operating system of an authorized target using privileged probes.
+      categories: [information-gathering]
+      tags: [os, fingerprinting]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [target]
+      properties:
+        target:
+          type: string
+          minLength: 1
+          maxLength: 253
+          pattern: "^[A-Za-z0-9][A-Za-z0-9.:_/%-]{0,252}$"
+    execution:
+      program: nmap
+      args: [-sS, -O, --osscan-guess, "{{target}}"]
+    requirements:
+      privilege: root
+    policy:
+      timeout_seconds: 1800
+  - metadata:
+      name: nmap_tls_audit
+      description: Inventory TLS services and enumerate supported protocol and cipher configuration on common TLS ports.
+      categories: [vulnerability-analysis]
+      tags: [tls, ciphers, configuration]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [target]
+      properties:
+        target:
+          type: string
+          minLength: 1
+          maxLength: 253
+          pattern: "^[A-Za-z0-9][A-Za-z0-9.:_/%-]{0,252}$"
+    execution:
+      program: nmap
+      args: [-sT, -sV, -p, "443,8443", --script, ssl-enum-ciphers, "{{target}}"]
+    policy:
+      timeout_seconds: 1800
+  - metadata:
+      name: nmap_smb_security_audit
+      description: Identify SMB protocol dialects and transport security settings on TCP port 445.
+      categories: [information-gathering]
+      tags: [smb, protocols, security]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [target]
+      properties:
+        target:
+          type: string
+          minLength: 1
+          maxLength: 253
+          pattern: "^[A-Za-z0-9][A-Za-z0-9.:_/%-]{0,252}$"
+    execution:
+      program: nmap
+      args: [-sT, -p, "445", --script, "smb-protocols,smb-security-mode,smb2-security-mode", "{{target}}"]
+    policy:
+      timeout_seconds: 1800
+  - metadata:
+      name: nmap_web_inventory
+      description: Identify common HTTP services, page titles, and advertised authentication methods.
+      categories: [information-gathering]
+      tags: [http, inventory, authentication]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [target]
+      properties:
+        target:
+          type: string
+          minLength: 1
+          maxLength: 253
+          pattern: "^[A-Za-z0-9][A-Za-z0-9.:_/%-]{0,252}$"
+    execution:
+      program: nmap
+      args: [-sT, -sV, -p, "80,443,8080,8443", --script, "http-title,http-auth", "{{target}}"]
     policy:
       timeout_seconds: 1800

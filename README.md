@@ -86,9 +86,14 @@ target/release/mcp-kali-bridge
 ├── bin/                         # mcp-kali and mcp-kali-bridge
 ├── etc/
 │   ├── mcp-kali.conf            # normal, non-secret user configuration
-│   └── plugins/                 # Plugin manifests and capability catalog
+│   ├── plugins/                 # administrator Plugin/catalog overlay
+│   └── references/              # operator-imported reference overlay
+├── share/
+│   └── plugins/                 # packaged Plugins, catalog, and references
 │       ├── capability-catalog.yaml
-│       └── <plugin>/plugin.yaml
+│       └── <plugin>/
+│           ├── plugin.yaml
+│           └── references/*.md
 └── var/jobs/                    # private durable job state and output
 ```
 
@@ -149,10 +154,10 @@ different existing account when needed, for example `sudo make install
 MCP_KALI_USER=hutt MCP_KALI_GROUP=hutt`. `install-local` and `install-system`
 remain available when automation needs to force a mode.
 
-The system install places binaries under `/usr/local/bin`, Plugin manifests and the
-capability catalog under `/etc/mcp-kali/plugins`, a non-secret configuration
-template at `/etc/mcp-kali/mcp-kali.conf`, private state under
-`/var/lib/mcp-kali/jobs`, and the generated `mcp-kali.service` unit. Review the
+The system install places binaries under `/usr/local/bin`, immutable Plugin,
+catalog, and reference data under `/usr/lib/mcp-kali`, administrator overlays
+under `/etc/mcp-kali`, private state under `/var/lib/mcp-kali/jobs`, and the
+generated unit at `/usr/lib/systemd/system/mcp-kali.service`. Review the
 configuration and sudoers policy before enabling it. Use `make status-system`
 and `make logs-system` for operations; `systemctl reload mcp-kali` maps to
 `SIGHUP`. The service runs from the selected service user's home directory;
@@ -237,8 +242,8 @@ not accept the prior `--env-file` / `MCP_KALI_ENV_FILE` selectors.
 | `MCP_KALI_MAX_CONCURRENCY` | Server | `2` | Simultaneous jobs, range 1–256 |
 | `MCP_KALI_DEFAULT_TIMEOUT` | Server | `1800` | Default wall timeout, range 1–604800 seconds |
 | `MCP_KALI_REVEAL_SENSITIVE_DATA` | Server | `false` | Show unredacted commands in public records |
-| `MCP_KALI_SYSTEM_DATA_DIR` | Server | `~/.mcp-kali/etc` | Plugin manifests and base catalog |
-| `MCP_KALI_CONFIG_DIR` | Server | `~/.mcp-kali/etc` | Plugin and catalog configuration directory |
+| `MCP_KALI_SYSTEM_DATA_DIR` | Server | `~/.mcp-kali/share` | Packaged Plugin, catalog, and reference data |
+| `MCP_KALI_CONFIG_DIR` | Server | `~/.mcp-kali/etc` | Administrator Plugin, catalog, and reference overlays |
 | `MCP_KALI_DISABLE_EXECUTE_COMMAND` | Server | `false` | Remove the privileged free-execution tool |
 | `MCP_KALI_PRIVILEGE_ELEVATION` | Server | `auto` | `auto` uses `sudo -n` for declarative root-required tools unless already root; `none` runs them directly |
 | `MCP_KALI_ALLOW_REMOTE_BIND` | Server | `false` | Acknowledge an unauthenticated non-loopback bind |
@@ -303,6 +308,29 @@ The separate capability catalog maps stable semantic IDs to Plugin providers.
 Catalog references remain visible with an availability flag when an optional
 Plugin or tool is not installed.
 
+Plugins may ship validated Markdown guidance under `<plugin>/references/`.
+Packaged references are loaded first; files under `CONFIG_DIR/references/` or
+an overlay Plugin's `references/` directory may add or replace them by stable
+reference ID. The dashboard and MCP Resources read this same registry. Invalid
+references are isolated at `/api/references/diagnostics`.
+
+Import an operator guide without editing packaged data:
+
+```bash
+mcp-kali references import ./internal-nmap.md \
+  --id nmap.internal-discovery \
+  --plugin org.mcp-kali.nmap \
+  --title "Internal Nmap discovery" \
+  --description "Approved internal discovery procedure." \
+  --tag nmap \
+  --related-tool nmap_host_discovery \
+  --related-capability network.host_discovery
+```
+
+The import refuses symlinks, files over 256 KiB, invalid identifiers, and an
+existing destination. Imported content is guidance only and cannot add an
+executable tool. Send `SIGHUP` after importing while the service is running.
+
 ## MCP host setup
 
 Example configuration:
@@ -323,12 +351,11 @@ For example, on macOS use `/Users/you/.local/bin/mcp-kali-bridge`, after running
 `make client-install` on that Mac. The bridge runs beside the MCP host, not on
 the Kali server, and connects to the server URL supplied in `args`.
 
-The client retrieves the current Plugin tool projection from the server for
-each MCP `tools/list` request and forwards calls to the generic invocation API.
-For a long-lived bridge connection, it polls the server every five seconds and
-sends the MCP `notifications/tools/list_changed` notification when the
-projection changes, so capable hosts can refresh their tool index after a
-server restart or Plugin change.
+The client retrieves current tools and references from the server for MCP
+`tools/list`, `resources/list`, and `resources/read` requests. It forwards tool
+calls to the generic invocation API. For a long-lived bridge connection, it
+polls the server every five seconds and sends tool- or resource-list change
+notifications when either projection changes.
 
 ### Runtime signals
 
@@ -336,11 +363,11 @@ server restart or Plugin change.
 accepting jobs, cancels queued work, sends `SIGTERM` to active job process
 groups, waits up to 10 seconds, then force-kills survivors and persists their
 terminal state before exiting. `SIGHUP` atomically reloads the
-Plugin/catalog runtime. When `MCP_KALI_MAX_CONCURRENCY` comes from the loaded
+Plugin/catalog/reference runtime. When `MCP_KALI_MAX_CONCURRENCY` comes from the loaded
 configuration file rather than an environment variable or CLI flag, `SIGHUP`
 also applies its new value without interrupting running jobs. A lower limit
 drains naturally; a higher limit starts queued jobs immediately. A reload with
-configuration or Plugin diagnostics retains the prior runtime.
+configuration, Plugin, or reference diagnostics retains the prior runtime.
 Send a second `SIGTERM` (or `SIGINT`) to skip the grace period and immediately
 force-kill active job process groups.
 The always-available job Plugin exposes listing, status, output paging, cancel,
@@ -356,6 +383,8 @@ The dashboard provides:
 - compact Active & queue and Finished history views;
 - a Tools view of registered Plugins and tools, declared command requirements,
   and isolated unavailable-Plugin diagnostics;
+- a References view of packaged and operator-imported guidance, displayed as
+  escaped Markdown text with provenance and isolated diagnostics;
 - queue order, state, tool, command summary, and elapsed time;
 - a left-edge `>` control that expands full metadata and wrapped command text;
 - pause, resume, remove, and force-kill controls where applicable;

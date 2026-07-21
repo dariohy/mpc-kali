@@ -5,8 +5,10 @@ VERSION := $(shell awk -F '"' '/^version = / { print $$2; exit }' Cargo.toml)
 MCP_KALI_HOME ?= $(HOME)/.mcp-kali
 INSTALL_DIR ?= $(MCP_KALI_HOME)/bin
 CONFIG_DIR ?= $(MCP_KALI_HOME)/etc
+DATA_DIR ?= $(MCP_KALI_HOME)/share
 STATE_DIR ?= $(MCP_KALI_HOME)/var/jobs
-PLUGIN_DIR := $(CONFIG_DIR)/plugins
+PLUGIN_DIR := $(DATA_DIR)/plugins
+REFERENCE_OVERLAY_DIR := $(CONFIG_DIR)/references
 CONFIG_FILE := $(CONFIG_DIR)/mcp-kali.conf
 LOCAL_BIN_DIR ?= $(HOME)/.local/bin
 COMPLETION_DIR := target/completions
@@ -14,8 +16,11 @@ SECURITY_DIR := target/security
 SYSTEM_PREFIX ?= /usr/local
 SYSTEM_BIN_DIR ?= $(SYSTEM_PREFIX)/bin
 SYSTEM_CONFIG_DIR ?= /etc/mcp-kali
+SYSTEM_DATA_DIR ?= /usr/lib/mcp-kali
+SYSTEM_PLUGIN_DIR := $(SYSTEM_DATA_DIR)/plugins
+SYSTEM_REFERENCE_OVERLAY_DIR := $(SYSTEM_CONFIG_DIR)/references
 SYSTEM_STATE_DIR ?= /var/lib/mcp-kali/jobs
-SYSTEMD_UNIT_DIR ?= /etc/systemd/system
+SYSTEMD_UNIT_DIR ?= /usr/lib/systemd/system
 MCP_KALI_USER ?= kali
 MCP_KALI_GROUP ?= $(MCP_KALI_USER)
 SYSTEM_CONFIG_FILE := $(SYSTEM_CONFIG_DIR)/mcp-kali.conf
@@ -43,7 +48,7 @@ help:
 	@echo "  client-install Build and locally install only mcp-kali-bridge"
 	@echo "  install       Install locally as a user, or system-wide as root"
 	@echo "  install-local Create a self-contained per-user installation under ~/.mcp-kali"
-	@echo "  install-system Install binaries, data, config template, and systemd unit (root; defaults to kali)"
+	@echo "  install-system Install binaries, read-only data, config template, and systemd unit (root; defaults to kali)"
 	@echo "  uninstall     Remove the local user install, or the system install as root"
 	@echo "  systemd-reload Reload systemd unit files after install-system"
 	@echo "  enable-system  Enable and start mcp-kali.service"
@@ -113,7 +118,7 @@ client-install:
 install-local: release
 	@test "$$(id -u)" -ne 0 || { echo "install-local is for a non-root user; use make install MCP_KALI_USER=<authorized-user> as root" >&2; exit 2; }
 	mkdir -p "$(INSTALL_DIR)"
-	mkdir -p "$(PLUGIN_DIR)"
+	mkdir -p "$(PLUGIN_DIR)" "$(CONFIG_DIR)/plugins" "$(REFERENCE_OVERLAY_DIR)"
 	mkdir -p "$(STATE_DIR)"
 	mkdir -p "$(LOCAL_BIN_DIR)"
 	@test -e "$(CONFIG_FILE)" || install -m 0644 "examples/mcp-kali.conf.example" "$(CONFIG_FILE)"
@@ -157,13 +162,14 @@ uninstall-local:
 uninstall-system:
 	@test "$$(id -u)" -eq 0 || { echo "uninstall-system must run as root" >&2; exit 2; }
 	@case "$(SYSTEM_CONFIG_DIR)" in ""|/) echo "refusing unsafe SYSTEM_CONFIG_DIR=$(SYSTEM_CONFIG_DIR)" >&2; exit 2;; esac
+	@case "$(SYSTEM_DATA_DIR)" in */mcp-kali) :;; *) echo "refusing unsafe SYSTEM_DATA_DIR=$(SYSTEM_DATA_DIR); expected a path ending in /mcp-kali" >&2; exit 2;; esac
 	@case "$(SYSTEM_STATE_DIR)" in ""|/) echo "refusing unsafe SYSTEM_STATE_DIR=$(SYSTEM_STATE_DIR)" >&2; exit 2;; esac
 	@if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files --no-legend mcp-kali.service 2>/dev/null | grep -q '^mcp-kali.service'; then \
 		systemctl disable --now mcp-kali.service; \
 	fi
 	rm -f "$(SYSTEM_UNIT_FILE)" "$(SYSTEM_BIN_DIR)/$(SERVER_BIN)" "$(SYSTEM_BIN_DIR)/$(CLIENT_BIN)"
 	@if command -v systemctl >/dev/null 2>&1; then systemctl daemon-reload; fi
-	rm -rf "$(SYSTEM_CONFIG_DIR)" "$(SYSTEM_STATE_DIR)"
+	rm -rf "$(SYSTEM_CONFIG_DIR)" "$(SYSTEM_DATA_DIR)" "$(SYSTEM_STATE_DIR)"
 
 install-system: release
 	@test "$$(id -u)" -eq 0 || { echo "install-system must run as root" >&2; exit 2; }
@@ -172,14 +178,14 @@ install-system: release
 	@id -u "$(MCP_KALI_USER)" >/dev/null 2>&1 || { echo "service user $(MCP_KALI_USER) does not exist; create or select an authorized account" >&2; exit 2; }
 	@getent group "$(MCP_KALI_GROUP)" >/dev/null 2>&1 || { echo "service group $(MCP_KALI_GROUP) does not exist" >&2; exit 2; }
 	@service_home="$$(getent passwd "$(MCP_KALI_USER)" | awk -F: 'NR == 1 { print $$6 }')"; test -n "$$service_home" && test -d "$$service_home" || { echo "service user $(MCP_KALI_USER) has no usable home directory" >&2; exit 2; }
-	install -d -m 0755 "$(SYSTEM_BIN_DIR)" "$(SYSTEM_CONFIG_DIR)/plugins" "$(SYSTEMD_UNIT_DIR)"
+	install -d -m 0755 "$(SYSTEM_BIN_DIR)" "$(SYSTEM_PLUGIN_DIR)" "$(SYSTEM_CONFIG_DIR)/plugins" "$(SYSTEM_REFERENCE_OVERLAY_DIR)" "$(SYSTEMD_UNIT_DIR)"
 	install -d -o "$(MCP_KALI_USER)" -g "$(MCP_KALI_GROUP)" -m 0700 "$(SYSTEM_STATE_DIR)"
 	install -m 0755 "target/release/$(SERVER_BIN)" "$(SYSTEM_BIN_DIR)/$(SERVER_BIN)"
 	install -m 0755 "target/release/$(CLIENT_BIN)" "$(SYSTEM_BIN_DIR)/$(CLIENT_BIN)"
-	cp -R plugins/. "$(SYSTEM_CONFIG_DIR)/plugins/"
+	cp -R plugins/. "$(SYSTEM_PLUGIN_DIR)/"
 	@test -e "$(SYSTEM_CONFIG_FILE)" || install -m 0644 "examples/mcp-kali.system.conf.example" "$(SYSTEM_CONFIG_FILE)"
 	@service_home="$$(getent passwd "$(MCP_KALI_USER)" | awk -F: 'NR == 1 { print $$6 }')"; \
-		sed -e 's|@MCP_KALI_USER@|$(MCP_KALI_USER)|g' -e 's|@MCP_KALI_GROUP@|$(MCP_KALI_GROUP)|g' -e 's|@MCP_KALI_HOME@|'"$$service_home"'|g' -e 's|@MCP_KALI_BIN@|$(SYSTEM_BIN_DIR)/$(SERVER_BIN)|g' -e 's|@MCP_KALI_CONFIG_FILE@|$(SYSTEM_CONFIG_FILE)|g' "systemd/mcp-kali.service.in" > "$(SYSTEM_UNIT_FILE)"
+		sed -e 's|@MCP_KALI_USER@|$(MCP_KALI_USER)|g' -e 's|@MCP_KALI_GROUP@|$(MCP_KALI_GROUP)|g' -e 's|@MCP_KALI_HOME@|'"$$service_home"'|g' -e 's|@MCP_KALI_BIN@|$(SYSTEM_BIN_DIR)/$(SERVER_BIN)|g' -e 's|@MCP_KALI_CONFIG_FILE@|$(SYSTEM_CONFIG_FILE)|g' -e 's|@MCP_KALI_SYSTEM_DATA_DIR@|$(SYSTEM_DATA_DIR)|g' -e 's|@MCP_KALI_CONFIG_DIR@|$(SYSTEM_CONFIG_DIR)|g' "systemd/mcp-kali.service.in" > "$(SYSTEM_UNIT_FILE)"
 	chmod 0644 "$(SYSTEM_UNIT_FILE)"
 	@echo "Installed $(SYSTEM_UNIT_FILE). Run: make systemd-reload enable-system"
 

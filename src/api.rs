@@ -53,6 +53,9 @@ pub async fn serve(
         .route("/api/plugins", get(plugins))
         .route("/api/plugins/diagnostics", get(plugin_diagnostics))
         .route("/api/plugins/{plugin_id}", get(plugin_get))
+        .route("/api/references", get(references))
+        .route("/api/references/diagnostics", get(reference_diagnostics))
+        .route("/api/references/{reference_id}", get(reference_get))
         .route("/api/capabilities", get(capabilities))
         .route(
             "/api/capabilities/{capability_id}/tools",
@@ -250,6 +253,29 @@ async fn plugin_get(
 
 async fn plugin_diagnostics(State(state): State<AppState>) -> Json<Value> {
     Json(json!({"diagnostics": state.registry.read().await.diagnostics()}))
+}
+
+async fn references(State(state): State<AppState>) -> Json<Value> {
+    Json(json!({"references": state.registry.read().await.references()}))
+}
+
+async fn reference_get(
+    State(state): State<AppState>,
+    Path(reference_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    state
+        .registry
+        .read()
+        .await
+        .reference(&reference_id)
+        .map(|reference| Json(json!({"reference": reference})))
+        .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "reference not found".into()))
+}
+
+async fn reference_diagnostics(State(state): State<AppState>) -> Json<Value> {
+    Json(json!({
+        "diagnostics": state.registry.read().await.reference_diagnostics()
+    }))
 }
 
 async fn capabilities(State(state): State<AppState>) -> Json<Value> {

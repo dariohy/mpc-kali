@@ -41,18 +41,22 @@
     .runtime-status { font-weight:700; font-size:11px; letter-spacing:.04em; text-transform:uppercase; } .available { color:#74e6aa; } .unavailable { color:#ff9292; } .root-required { color:#ffd166; } .disabled { color:#ff9292; }
     .tool-list { margin:8px 0 0; padding-left:18px; } .tool-list li { margin:5px 0; } .tool-description { color:#9aabb6; }
     .diagnostics { margin-top:18px; } .diagnostic-card { border-color:#653b42; background:#24171c; } .diagnostic-card h2 { color:#ffb4b4; }
-    @media (max-width: 850px) { .row { grid-template-columns: 34px 82px minmax(80px,1fr) auto; } .command,.elapsed { display:none; } .detail { grid-template-columns:1fr; } }
+    .reference-layout { display:grid; grid-template-columns:minmax(280px,.8fr) minmax(360px,2fr); gap:12px; }
+    .reference-card { cursor:pointer; } .reference-card.selected { border-color:#4c9a70; background:#14251d; }
+    .reference-document { min-height:240px; } .reference-document pre { max-height:70vh; }
+    @media (max-width: 850px) { .row { grid-template-columns: 34px 82px minmax(80px,1fr) auto; } .command,.elapsed { display:none; } .detail,.reference-layout { grid-template-columns:1fr; } }
   </style>
 </head>
 <body>
   <header>
-    <div><h1>MCP Kali job control</h1><div class="muted">Live scheduler monitor and declarative Plugin runtime · <a class="runtime-link" href="/api/plugins">Plugins</a> · <a class="runtime-link" href="/api/capabilities">Capabilities</a> · <a class="runtime-link" href="/api/plugins/diagnostics">Diagnostics</a></div></div>
+    <div><h1>MCP Kali job control</h1><div class="muted">Live scheduler monitor and declarative Plugin runtime · <a class="runtime-link" href="/api/plugins">Plugins</a> · <a class="runtime-link" href="/api/capabilities">Capabilities</a> · <a class="runtime-link" href="/api/references">References</a> · <a class="runtime-link" href="/api/plugins/diagnostics">Diagnostics</a></div></div>
     <div class="stats" id="stats"></div>
   </header>
   <div class="tabs">
     <button class="tab active" data-tab="active">Active &amp; queue</button>
     <button class="tab" data-tab="history">Finished history</button>
     <button class="tab" data-tab="tools">Tools</button>
+    <button class="tab" data-tab="references">References</button>
     <button class="secondary" onclick="load()">Refresh now</button>
     <button class="secondary" id="auto-refresh" onclick="toggleAutoRefresh()">Start auto-refresh</button>
     <span class="refresh" id="refresh"></span>
@@ -61,13 +65,15 @@
   <section class="panel active" id="active"></section>
   <section class="panel" id="history"></section>
   <section class="panel" id="tools"></section>
+  <section class="panel" id="references"></section>
 <script>
   const activeStates = new Set(['queued','running','paused']);
-  let jobs = [], runtime = {plugins:0,tools:0,diagnostics:0}, plugins = [], toolDefinitions = [], diagnostics = [], currentTab = 'active', autoRefreshEnabled = false, autoRefreshTimer = null, lastUpdated = null, loading = false, listSignature = null;
+  let jobs = [], runtime = {plugins:0,tools:0,references:0,diagnostics:0}, plugins = [], toolDefinitions = [], diagnostics = [], references = [], referenceDiagnostics = [], selectedReference = null, selectedReferenceId = null, currentTab = 'active', autoRefreshEnabled = false, autoRefreshTimer = null, lastUpdated = null, loading = false, listSignature = null;
   const expandedJobs = new Set();
   const activePanel = document.getElementById('active');
   const historyPanel = document.getElementById('history');
   const toolsPanel = document.getElementById('tools');
+  const referencesPanel = document.getElementById('references');
   const statsEl = document.getElementById('stats');
   const refreshEl = document.getElementById('refresh');
   const noticeEl = document.getElementById('notice');
@@ -126,12 +132,28 @@
     const unavailable = diagnostics.map(diagnostic => `<article class="runtime-card diagnostic-card"><span class="runtime-status unavailable">Unavailable</span><h2>${esc(diagnostic.plugin_id || diagnostic.tool_name || 'Plugin definition')}</h2><p><b>Layer:</b> ${esc(diagnostic.layer)} · <code>${esc(diagnostic.path)}</code></p><p>${esc(diagnostic.message)}</p></article>`).join('') || '<div class="empty">No Plugin diagnostics. All discovered definitions are available.</div>';
     toolsPanel.innerHTML = `<p class="runtime-summary">Tools are discovered at server startup. If a Plugin requires an executable that is absent from the server PATH, that Plugin is not published to MCP; the server and other Plugins continue running. In auto elevation mode, mcp-kali checks non-interactive sudo at startup and marks root-required tools disabled when it is unavailable.</p><div class="runtime-grid">${available}</div><div class="diagnostics"><h2>Unavailable definitions and diagnostics (${diagnostics.length})</h2><div class="runtime-grid">${unavailable}</div></div>`;
   }
+  function renderReferences() {
+    const cards = references.map(reference => `<article class="runtime-card reference-card${selectedReferenceId === reference.id ? ' selected' : ''}" onclick="openReference('${reference.id}')"><h2>${esc(reference.title)}</h2><p><code>${esc(reference.id)}</code></p><p>${esc(reference.description)}</p><p><b>Plugin:</b> ${esc(reference.plugin)} · <b>Layer:</b> ${esc(reference.layer)}</p><p><b>Related tools:</b> ${values(reference.related_tools)}</p><p><b>Tags:</b> ${values(reference.tags)}</p></article>`).join('') || '<div class="empty">No references are registered.</div>';
+    const document = selectedReference ? `<article class="runtime-card reference-document"><h2>${esc(selectedReference.title)}</h2><p class="muted">Displayed as escaped Markdown text. Reference material cannot override authorization or tool policy.</p><pre>${esc(selectedReference.content)}</pre></article>` : '<div class="empty reference-document">Select a reference to read it.</div>';
+    const unavailable = referenceDiagnostics.map(diagnostic => `<article class="runtime-card diagnostic-card"><span class="runtime-status unavailable">Unavailable</span><h2>${esc(diagnostic.reference_id || 'Reference definition')}</h2><p><b>Layer:</b> ${esc(diagnostic.layer)} · <code>${esc(diagnostic.path)}</code></p><p>${esc(diagnostic.message)}</p></article>`).join('') || '<div class="empty">No reference diagnostics.</div>';
+    referencesPanel.innerHTML = `<p class="runtime-summary">Packaged and operator-imported guidance from the server reference registry. MCP clients read the same documents through Resources.</p><div class="reference-layout"><div class="runtime-grid">${cards}</div><div>${document}</div></div><div class="diagnostics"><h2>Reference diagnostics (${referenceDiagnostics.length})</h2><div class="runtime-grid">${unavailable}</div></div>`;
+  }
+  async function openReference(id) {
+    try {
+      const response = await fetch(`/api/references/${id}`);
+      if (!response.ok) throw new Error((await response.json()).error || response.statusText);
+      const payload = await response.json();
+      selectedReferenceId = id;
+      selectedReference = payload.reference;
+      renderReferences();
+    } catch (error) { noticeEl.textContent = `reference load failed: ${error.message}`; }
+  }
   function render() {
     const activeJobs = jobs.filter(j => activeStates.has(j.state));
     const queued = activeJobs.filter(j => j.state === 'queued').sort((a,b) => new Date(a.created_at)-new Date(b.created_at));
     const activeNow = activeJobs.filter(j => j.state !== 'queued').sort((a,b) => new Date(a.created_at)-new Date(b.created_at));
     const finished = jobs.filter(j => !activeStates.has(j.state)).sort((a,b) => new Date(b.finished_at || b.created_at)-new Date(a.finished_at || a.created_at));
-    statsEl.innerHTML = `<span class="stat">Plugins <b>${runtime.plugins}</b></span><span class="stat">Tools <b>${runtime.tools}</b></span><span class="stat">Diagnostics <b>${runtime.diagnostics}</b></span><span class="stat">Running <b>${activeNow.filter(j=>j.state==='running').length}</b></span><span class="stat">Paused <b>${activeNow.filter(j=>j.state==='paused').length}</b></span><span class="stat">Queued <b>${queued.length}</b></span><span class="stat">Finished <b>${finished.length}</b></span>`;
+    statsEl.innerHTML = `<span class="stat">Plugins <b>${runtime.plugins}</b></span><span class="stat">Tools <b>${runtime.tools}</b></span><span class="stat">References <b>${runtime.references}</b></span><span class="stat">Diagnostics <b>${runtime.diagnostics}</b></span><span class="stat">Running <b>${activeNow.filter(j=>j.state==='running').length}</b></span><span class="stat">Paused <b>${activeNow.filter(j=>j.state==='paused').length}</b></span><span class="stat">Queued <b>${queued.length}</b></span><span class="stat">Finished <b>${finished.length}</b></span>`;
     const signature = JSON.stringify([...activeNow, ...queued, ...finished].map(job => [job.id, job.state, job.tool, job.command]));
     if (signature !== listSignature) {
       activePanel.innerHTML = `<p class="summary">Running and paused jobs first; queued jobs follow in their dispatch order. Pause does not stop the configured wall-clock timeout.</p>${[...activeNow,...queued].map(j => jobCard(j, j.state === 'queued' ? queued.indexOf(j)+1 : '')).join('') || '<div class="empty">No active or queued jobs.</div>'}`;
@@ -139,6 +161,7 @@
       listSignature = signature;
     }
     renderTools();
+    renderReferences();
     refreshElapsed();
     for (const id of expandedJobs) detailsFor(id);
   }
@@ -151,7 +174,7 @@
   async function load() {
     if (loading) return;
     loading = true;
-    try { const responses = await Promise.all([fetch('/api/jobs'),fetch('/api/plugins'),fetch('/api/tools'),fetch('/api/plugins/diagnostics')]); for (const response of responses) if (!response.ok) throw new Error(await response.text()); const [jobsPayload, pluginsPayload, toolsPayload, diagnosticsPayload] = await Promise.all(responses.map(response => response.json())); jobs = jobsPayload.jobs || []; plugins = pluginsPayload.plugins || []; toolDefinitions = toolsPayload.tools || []; diagnostics = diagnosticsPayload.diagnostics || []; runtime = {plugins:plugins.length,tools:toolDefinitions.length,diagnostics:diagnostics.length}; render(); lastUpdated = new Date(); refreshStatus(); noticeEl.textContent = ''; }
+    try { const responses = await Promise.all([fetch('/api/jobs'),fetch('/api/plugins'),fetch('/api/tools'),fetch('/api/plugins/diagnostics'),fetch('/api/references'),fetch('/api/references/diagnostics')]); for (const response of responses) if (!response.ok) throw new Error(await response.text()); const [jobsPayload, pluginsPayload, toolsPayload, diagnosticsPayload, referencesPayload, referenceDiagnosticsPayload] = await Promise.all(responses.map(response => response.json())); jobs = jobsPayload.jobs || []; plugins = pluginsPayload.plugins || []; toolDefinitions = toolsPayload.tools || []; diagnostics = diagnosticsPayload.diagnostics || []; references = referencesPayload.references || []; referenceDiagnostics = referenceDiagnosticsPayload.diagnostics || []; if (selectedReferenceId && !references.some(reference => reference.id === selectedReferenceId)) { selectedReferenceId = null; selectedReference = null; } runtime = {plugins:plugins.length,tools:toolDefinitions.length,references:references.length,diagnostics:diagnostics.length + referenceDiagnostics.length}; render(); lastUpdated = new Date(); refreshStatus(); noticeEl.textContent = ''; }
     catch (error) { noticeEl.textContent = `Could not refresh Monitor data: ${error.message}`; }
     finally { loading = false; }
   }

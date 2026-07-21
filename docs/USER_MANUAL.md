@@ -187,9 +187,14 @@ This creates a non-root, self-contained user installation:
 ├── bin/                         # executable binaries
 ├── etc/
 │   ├── mcp-kali.conf            # normal, non-secret configuration
-│   └── plugins/                 # Plugin manifests and capability catalog
+│   ├── plugins/                 # administrator Plugin/catalog overlay
+│   └── references/              # operator reference overlay
+├── share/
+│   └── plugins/                 # packaged Plugins, catalog, and references
 │       ├── capability-catalog.yaml
-│       └── <plugin>/plugin.yaml
+│       └── <plugin>/
+│           ├── plugin.yaml
+│           └── references/*.md
 └── var/jobs/                    # durable private job data
 ```
 
@@ -304,7 +309,7 @@ messages. The binaries already direct tracing to stderr.
 | `MCP_KALI_MAX_CONCURRENCY` | `--max-concurrency` | `2` | 1–256 |
 | `MCP_KALI_DEFAULT_TIMEOUT` | `--default-timeout` | `1800` | 1–604800 seconds |
 | `MCP_KALI_REVEAL_SENSITIVE_DATA` | `--reveal-sensitive-data` | `false` | Boolean |
-| `MCP_KALI_SYSTEM_DATA_DIR` | `--system-data-dir` | `~/.mcp-kali/etc` | Directory |
+| `MCP_KALI_SYSTEM_DATA_DIR` | `--system-data-dir` | `~/.mcp-kali/share` | Directory |
 | `MCP_KALI_CONFIG_DIR` | `--config-dir` | `~/.mcp-kali/etc` | Directory |
 | `MCP_KALI_DISABLE_EXECUTE_COMMAND` | `--disable-execute-command` | `false` | Boolean |
 | `MCP_KALI_PRIVILEGE_ELEVATION` | `--privilege-elevation` | `auto` | `auto` or `none` |
@@ -395,13 +400,13 @@ account by default. Override it for another existing account, for example
 `sudo make install MCP_KALI_USER=hutt MCP_KALI_GROUP=hutt`.
 `install-local` and `install-system` remain available for explicit automation.
 
-The root-only installer places binaries in `/usr/local/bin`, Plugin manifests
-and the capability catalog in `/etc/mcp-kali/plugins`, state in
-`/var/lib/mcp-kali/jobs`, config in `/etc/mcp-kali/mcp-kali.conf`, and a
-rendered `mcp-kali.service` in `/etc/systemd/system`. It refuses to create or
-guess the service user, and it does not enable the service automatically. Review
-the generated configuration and sudoers policy first. Use `make status-system`
-and `make logs-system` after enablement.
+The root-only installer places binaries in `/usr/local/bin`, immutable Plugin,
+catalog, and reference data in `/usr/lib/mcp-kali`, state in
+`/var/lib/mcp-kali/jobs`, administrator configuration in `/etc/mcp-kali`, and
+the rendered unit at `/usr/lib/systemd/system/mcp-kali.service`. It refuses to
+create or guess the service user, and it does not enable the service
+automatically. Review the generated configuration and sudoers policy first.
+Use `make status-system` and `make logs-system` after enablement.
 
 The unit uses `Type=exec`, restart-on-failure, journald logging, `SIGTERM` for
 normal stop, and `ExecReload` to send `SIGHUP`. Its hardening intentionally does
@@ -426,10 +431,10 @@ is the signal a future systemd unit should use for normal stop and restart
 operations. A second `SIGTERM` or `SIGINT` skips the remainder of that grace
 period and immediately force-kills active job process groups.
 
-`SIGHUP` reloads the Plugin and capability-catalog runtime without interrupting
+`SIGHUP` reloads the Plugin, capability-catalog, and reference runtime without interrupting
 existing jobs. The reload is rejected and the previous runtime remains active
 if the configuration cannot be read, its concurrency value is invalid, or the
-replacement Plugin load reports diagnostics. The MCP bridge sees the changed
+replacement Plugin or reference load reports diagnostics. The MCP bridge sees the changed
 tool projection through its existing tool-list polling/notification behavior.
 
 When `MCP_KALI_MAX_CONCURRENCY` is set in the loaded configuration file,
@@ -567,7 +572,11 @@ when that projection changes. Scheduled Plugin tools accept runtime
 The shipped declarative operations are:
 
 ```text
-nmap_host_discovery        nmap_service_scan
+nmap_host_discovery        nmap_arp_host_discovery
+nmap_service_scan          nmap_syn_service_scan
+nmap_udp_service_scan      nmap_os_detection
+nmap_tls_audit             nmap_smb_security_audit
+nmap_web_inventory
 gobuster_content_discovery dirb_content_discovery
 nikto_web_scan             sqlmap_parameter_test
 hydra_authentication_test  john_password_crack
@@ -588,6 +597,34 @@ array and schedules it without a shell. `explore_command` accepts `binary` plus
 `locate`, `version`, `help`, or `manual` and returns a bounded synchronous local
 inspection. The administrator can remove `execute_command` with
 `--disable-execute-command`.
+
+### MCP reference resources
+
+The bridge implements `resources/list` and `resources/read`. Packaged Plugin
+guidance and operator-imported references are projected as
+`mcp-kali://references/<reference-id>` resources. Long-lived bridges send
+`notifications/resources/list_changed` when that index changes.
+
+References help select and interpret tools; they are not authorization or
+executable definitions and cannot override an MCP client's governing prompt or
+tool policy. Resource metadata includes the owning Plugin, related tools and
+capabilities, source layer, and server-side source path.
+
+Import a local Markdown guide into the administrator overlay:
+
+```bash
+mcp-kali references import ./internal-nmap.md \
+  --id nmap.internal-discovery \
+  --plugin org.mcp-kali.nmap \
+  --title "Internal Nmap discovery" \
+  --description "Approved internal discovery procedure." \
+  --related-tool nmap_host_discovery \
+  --related-capability network.host_discovery
+```
+
+The source must be a regular UTF-8 file no larger than 256 KiB. Import creates
+validated front matter under `CONFIG_DIR/references/<plugin-id>/` and refuses
+to overwrite an existing destination. Send `SIGHUP` to publish the new index.
 
 The built-in `mcp-kali.jobs` Plugin publishes the job and health tools below.
 
@@ -741,8 +778,9 @@ http://127.0.0.1:5000/monitor
 
 ### Header
 
-The counters show registered Plugins, published tools, unavailable-definition
-diagnostics, and running, paused, queued, and finished jobs.
+The counters show registered Plugins, published tools, references,
+unavailable-definition diagnostics, and running, paused, queued, and finished
+jobs.
 
 ### Tabs
 
@@ -753,6 +791,9 @@ diagnostics, and running, paused, queued, and finished jobs.
   root requirements, and startup diagnostics. A missing required executable prevents only that
   Plugin from being published through MCP; the server and other Plugins
   continue running.
+- **References:** packaged and operator-imported guidance from the same registry
+  exposed through MCP Resources. Markdown is HTML-escaped and displayed as
+  text, with its source layer and validation diagnostics.
 
 ### Compact job row
 
@@ -873,7 +914,7 @@ curl -sS http://127.0.0.1:5000/api/tools/nmap \
 
 Use the Core Plugin `execute_command` through the generic invocation endpoint.
 
-### Plugin and capability discovery
+### Plugin, capability, and reference discovery
 
 ```text
 GET /api/plugins
@@ -882,11 +923,14 @@ GET /api/plugins/diagnostics
 GET /api/capabilities
 GET /api/capabilities/{capability_id}/tools
 GET /api/tools
+GET /api/references
+GET /api/references/{reference_id}
+GET /api/references/diagnostics
 ```
 
 Catalog providers include `available` and `available_tools`; references to
 optional absent Plugins remain visible. Diagnostics isolate invalid Plugin,
-tool, and catalog files and include their layer and source path.
+tool, catalog, and reference files and include their layer and source path.
 
 See [PLUGIN_AUTHORING.md](PLUGIN_AUTHORING.md) for the complete manifest,
 template, layering, and catalog contract.
@@ -1487,6 +1531,7 @@ material. The upstream MIT terms and GPL-3.0-or-later are compatible.
 |---|---|
 | `mcp-kali --help` | Server options |
 | `mcp-kali --version` | Canonical package version |
+| `mcp-kali references import FILE ...` | Import an operator Markdown reference |
 | `mcp-kali completions SHELL` | Completion script on stdout |
 | `mcp-kali-bridge --help` | Bridge options |
 | `mcp-kali-bridge --version` | Canonical package version |
@@ -1510,6 +1555,9 @@ material. The upstream MIT terms and GPL-3.0-or-later are compatible.
 | GET | `/api/plugins` | Installed Plugin metadata |
 | GET | `/api/plugins/{plugin_id}` | One Plugin |
 | GET | `/api/plugins/diagnostics` | Isolated load errors |
+| GET | `/api/references` | Reference-resource metadata |
+| GET | `/api/references/{reference_id}` | One reference and Markdown body |
+| GET | `/api/references/diagnostics` | Isolated reference load errors |
 | GET | `/api/capabilities` | Capability catalog and provider availability |
 | GET | `/api/capabilities/{capability_id}/tools` | Available provider tools |
 | GET | `/api/tools` | MCP-ready dynamic tool projection |
@@ -1528,6 +1576,7 @@ material. The upstream MIT terms and GPL-3.0-or-later are compatible.
 | Job timeout | 1–604800 seconds |
 | Concurrency | 1–256 |
 | Output page | 1 MiB |
+| Reference Markdown | 256 KiB |
 | Tail line request | 1–500 lines |
 | MCP API error snippet | 512 characters |
 

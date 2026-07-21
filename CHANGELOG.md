@@ -5,6 +5,26 @@ All notable changes to MCP Kali are documented here. The project follows
 
 ## [Unreleased]
 
+### Added
+
+- Layered validated Plugin reference documents, REST discovery, a Monitor
+  References tab, and MCP `resources/list` / `resources/read` projection with
+  list-change notifications.
+- `mcp-kali references import` for adding bounded, non-symlink Markdown guides
+  to the administrator reference overlay without changing executable tools.
+- Curated Nmap profiles for ARP discovery, privileged SYN and UDP service
+  detection, OS fingerprinting, TLS configuration, SMB security posture, and
+  web-service inventory, with packaged selection and interpretation guidance.
+
+### Changed
+
+- Install immutable Plugin, capability, and reference data under
+  `/usr/lib/mcp-kali`, keep administrator overlays under `/etc/mcp-kali`, and
+  install the service unit under `/usr/lib/systemd/system`.
+- Make normal Nmap host discovery and TCP service detection unprivileged,
+  reserve root metadata for probe types that require raw-packet access, and
+  constrain targets and port expressions in every Nmap profile.
+
 ### Fixed
 
 - Preserve Nmap's `-p` port argument in public command displays while still

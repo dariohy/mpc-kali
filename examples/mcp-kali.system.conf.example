@@ -6,9 +6,9 @@
 RUST_LOG=mcp_kali=info,tower_http=info
 MCP_KALI_BIND=127.0.0.1:5000
 MCP_KALI_STATE_DIR=/var/lib/mcp-kali/jobs
-# System Plugin manifests and the capability catalog are administrator-managed
-# configuration under /etc, not packaged runtime data under /usr/local/share.
-MCP_KALI_SYSTEM_DATA_DIR=/etc/mcp-kali
+# Read-only packaged Plugins, references, and the capability catalog.
+MCP_KALI_SYSTEM_DATA_DIR=/usr/lib/mcp-kali
+# Administrator Plugin and reference overlays.
 MCP_KALI_CONFIG_DIR=/etc/mcp-kali
 MCP_KALI_MAX_CONCURRENCY=2
 MCP_KALI_DEFAULT_TIMEOUT=1800

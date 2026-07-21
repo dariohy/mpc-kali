@@ -5,6 +5,7 @@ use mcp_kali::{
     config::{default_config_dir, default_state_dir, default_system_data_dir},
     jobs::Scheduler,
     plugins::{PluginRegistry, PrivilegeElevation},
+    references::{ReferenceImport, import_reference},
 };
 use std::{env, net::SocketAddr, path::PathBuf, sync::Arc};
 use tokio::sync::RwLock;
@@ -84,6 +85,41 @@ enum Commands {
     /// Generate a shell completion script on stdout.
     #[command(hide = true)]
     Completions { shell: Shell },
+    /// Manage operator reference documents.
+    References {
+        #[command(subcommand)]
+        command: ReferenceCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum ReferenceCommands {
+    /// Import a Markdown guide into the administrator reference overlay.
+    Import {
+        /// Markdown file to import. Symlinks and files over 256 KiB are rejected.
+        file: PathBuf,
+        /// Stable lowercase reference ID, for example nmap.internal-discovery.
+        #[arg(long)]
+        id: String,
+        /// Plugin that owns this guidance.
+        #[arg(long)]
+        plugin: String,
+        /// Human-readable reference title.
+        #[arg(long)]
+        title: String,
+        /// Short description shown by MCP clients and the dashboard.
+        #[arg(long)]
+        description: String,
+        /// Search tag; repeat for multiple values.
+        #[arg(long = "tag")]
+        tags: Vec<String>,
+        /// Related declarative tool; repeat for multiple values.
+        #[arg(long = "related-tool")]
+        related_tools: Vec<String>,
+        /// Related capability ID; repeat for multiple values.
+        #[arg(long = "related-capability")]
+        related_capabilities: Vec<String>,
+    },
 }
 
 #[tokio::main]
@@ -93,14 +129,45 @@ async fn main() -> Result<()> {
     let loaded_config_file = mcp_kali::config::load_config_file()?;
     let cli = Cli::parse();
     let _ = &cli.config_file;
-    if let Some(Commands::Completions { shell }) = cli.command {
-        generate(
-            shell,
-            &mut Cli::command(),
-            "mcp-kali",
-            &mut std::io::stdout(),
-        );
-        return Ok(());
+    if let Some(command) = &cli.command {
+        match command {
+            Commands::Completions { shell } => {
+                generate(
+                    *shell,
+                    &mut Cli::command(),
+                    "mcp-kali",
+                    &mut std::io::stdout(),
+                );
+                return Ok(());
+            }
+            Commands::References {
+                command:
+                    ReferenceCommands::Import {
+                        file,
+                        id,
+                        plugin,
+                        title,
+                        description,
+                        tags,
+                        related_tools,
+                        related_capabilities,
+                    },
+            } => {
+                let destination = import_reference(ReferenceImport {
+                    source: file,
+                    config_dir: &cli.config_dir,
+                    id,
+                    plugin,
+                    title,
+                    description,
+                    tags: tags.clone(),
+                    related_tools: related_tools.clone(),
+                    related_capabilities: related_capabilities.clone(),
+                })?;
+                println!("Imported reference: {}", destination.display());
+                return Ok(());
+            }
+        }
     }
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -144,7 +211,8 @@ async fn main() -> Result<()> {
     tracing::info!(
         plugins = registry.plugins().len(),
         tools = registry.tools().len(),
-        diagnostics = registry.diagnostics().len(),
+        references = registry.references().len(),
+        diagnostics = registry.diagnostics().len() + registry.reference_diagnostics().len(),
         "plugin registry loaded"
     );
     let registry = Arc::new(RwLock::new(registry));
@@ -278,10 +346,11 @@ async fn reload_runtime(
         settings.execute_enabled,
         settings.privilege_elevation,
     );
-    if !replacement.diagnostics().is_empty() {
+    if !replacement.diagnostics().is_empty() || !replacement.reference_diagnostics().is_empty() {
         tracing::warn!(
-            diagnostics = replacement.diagnostics().len(),
-            "reload rejected: Plugin diagnostics were found; keeping last-known-good runtime"
+            diagnostics =
+                replacement.diagnostics().len() + replacement.reference_diagnostics().len(),
+            "reload rejected: Plugin or reference diagnostics were found; keeping last-known-good runtime"
         );
         log_registry_diagnostics(&replacement);
         return;
@@ -295,8 +364,9 @@ async fn reload_runtime(
     log_registry_diagnostics(&replacement);
     let plugins = replacement.plugins().len();
     let tools = replacement.tools().len();
+    let references = replacement.references().len();
     *registry.write().await = replacement;
-    tracing::info!(plugins, tools, max_concurrency = ?max_concurrency, "runtime reloaded after SIGHUP");
+    tracing::info!(plugins, tools, references, max_concurrency = ?max_concurrency, "runtime reloaded after SIGHUP");
 }
 
 fn has_cli_option(option: &str) -> bool {
@@ -315,6 +385,14 @@ fn log_registry_diagnostics(registry: &PluginRegistry) {
             path = %diagnostic.path,
             message = %diagnostic.message,
             "plugin diagnostic"
+        );
+    }
+    for diagnostic in registry.reference_diagnostics() {
+        tracing::warn!(
+            layer = %diagnostic.layer,
+            path = %diagnostic.path,
+            message = %diagnostic.message,
+            "reference diagnostic"
         );
     }
 }

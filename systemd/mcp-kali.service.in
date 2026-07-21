@@ -14,7 +14,7 @@ WorkingDirectory=@MCP_KALI_HOME@
 # Keep the application configuration out of systemd's environment: mcp-kali
 # reads this file itself, allowing SIGHUP to reload supported settings.
 Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-ExecStart=@MCP_KALI_BIN@ --config-file @MCP_KALI_CONFIG_FILE@
+ExecStart=@MCP_KALI_BIN@ --config-file @MCP_KALI_CONFIG_FILE@ --system-data-dir @MCP_KALI_SYSTEM_DATA_DIR@ --config-dir @MCP_KALI_CONFIG_DIR@
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=2s

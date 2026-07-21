@@ -1,9 +1,10 @@
 # MCP Kali Plugin authoring
 
-MCP Kali 2.0 discovers declarative YAML Plugins at server startup. Plugin files
-are trusted local configuration, but every definition is validated before it is
-registered. Invalid Plugins are isolated and reported through
-`GET /api/plugins/diagnostics`.
+MCP Kali 2.x discovers declarative YAML Plugins at startup and on `SIGHUP`
+reload. Plugin files are trusted local configuration, but every definition is
+validated before it is registered. Invalid Plugins are isolated and reported
+through `GET /api/plugins/diagnostics`. A reload that produces diagnostics keeps
+the last-known-good Plugin and capability runtime active.
 
 ## Layout and precedence
 
@@ -11,13 +12,28 @@ registered. Invalid Plugins are isolated and reported through
 SYSTEM_DATA_DIR/
 └── plugins/
     ├── capability-catalog.yaml
-    └── <plugin>/plugin.yaml
+    └── <plugin>/
+        ├── plugin.yaml
+        ├── tools/*.yaml
+        └── references/*.md
 
 CONFIG_DIR/
-└── plugins/
-    ├── capability-catalog.yaml
-    └── <plugin>/plugin.yaml
+├── plugins/                     # executable definition overlays
+│   ├── capability-catalog.yaml
+│   └── <plugin>/
+│       ├── plugin.yaml
+│       ├── tools/*.yaml
+│       └── references/*.md
+└── references/                  # guidance-only overlays/imports
+    └── <plugin-id>/*.md
 ```
+
+For a user installation, `SYSTEM_DATA_DIR` is `~/.mcp-kali/share` and
+`CONFIG_DIR` is `~/.mcp-kali/etc`. For a system installation, packaged data is
+read-only under `/usr/lib/mcp-kali` and the administrator overlay is
+`/etc/mcp-kali`. In a source checkout, packaged definitions are in the
+repository's top-level `plugins/` directory; use the repository root as
+`SYSTEM_DATA_DIR` when running directly from source.
 
 The packaged system layer loads first. A valid administrator-overlay Plugin
 with the same `metadata.id`, or tool with the same `metadata.name`, replaces the
@@ -64,18 +80,35 @@ names use lowercase ASCII letters, digits, and underscores. The input schema
 must be a valid JSON Schema object schema.
 
 `requires.commands` and tool-level `requirements.commands` contain bare command
-names. Every declared command must be executable on the server's `PATH` at
-startup. Tool-level `requirements.privilege` may be `root`. It is published in
-the MCP metadata and, with the default `MCP_KALI_PRIVILEGE_ELEVATION=auto`, the
-runtime executes that declarative tool as `sudo -n -- program args...` unless
-the server is already root. `sudo -n` never prompts; the host's sudoers policy
-decides whether the job succeeds. At startup the runtime probes non-interactive
-sudo and publishes an `enabled` flag plus `_meta.elevation` status for each
-tool; a failed probe disables root-required tools in auto mode. Command-specific
-sudoers rules may still reject an individual job. Set the runtime mode to `none`
-to leave the argv unchanged. Plugin-level privilege remains descriptive; declare
-it on each tool that needs elevation. `policy.requires_explicit_enable` only
-marks a tool privileged in the public projection.
+names. Every declared command must be executable on the server's `PATH` at load
+time; a missing command makes that Plugin unavailable and produces a diagnostic.
+
+Tool-level `requirements.privilege` accepts only `root`. It is published in MCP
+metadata and the Monitor Tools view. With the default
+`MCP_KALI_PRIVILEGE_ELEVATION=auto`, a root-required declarative tool runs as
+the server identity when the server is root; otherwise its rendered argv is
+prefixed with `sudo -n --`. No interactive sudo prompt is opened.
+
+At load time, the runtime resolves each root-required program and checks that
+specific executable with `sudo -n -l /absolute/path/to/program`; it does not
+use `sudo -v`. In auto mode, a failed per-program check marks only that tool
+disabled in MCP (`_meta.enabled: false` and `_meta.elevation`) and in the
+Monitor. This avoids a password-required sudo rule incorrectly masking a later
+`NOPASSWD` rule for the declared program. Operators can test the same condition
+for a service account without executing the program:
+
+```bash
+sudo -u <service-user> /usr/bin/sudo -n -l /usr/bin/nmap
+```
+
+Set the runtime mode to `none` to leave a root-required tool's argv unchanged.
+Plugin-level privilege remains descriptive; declare it on every tool that
+requires elevation. `policy.requires_explicit_enable` only marks a tool
+privileged in public metadata; it does not grant or broker privilege.
+
+This mechanism applies only to declarative Plugin tools. The Core
+`execute_command` tool remains explicit raw argv; its caller may invoke
+`sudo -n -- command ...` itself when appropriate.
 
 ## Safe argument templates
 
@@ -119,9 +152,69 @@ input_schema:
 execution:
   program: example
   args: [--version]
+requirements:
+  commands: [example]
+policy:
+  timeout_seconds: 30
 ```
 
 The tool belongs to the Plugin whose manifest is in the parent directory.
+
+## Plugin references
+
+A Plugin may include Markdown documents that help operators and MCP clients
+select and interpret its declarative tools. References are guidance only: they
+cannot add tools, change schemas, grant privilege, or authorize a target.
+
+Place packaged references under the Plugin's `references/` directory. Each
+file starts with validated YAML front matter:
+
+```markdown
+---
+apiVersion: mcp-kali/v1
+kind: PluginReference
+metadata:
+  id: example.safe-use
+  title: Safe Example use
+  description: Choose and interpret the Example Plugin tools.
+plugin: local.example
+tags: [example, operations]
+related_tools: [example_print]
+related_capabilities: [example.printing]
+---
+
+# Safe Example use
+
+Use `example_print` when...
+```
+
+Reference IDs use lowercase ASCII letters, digits, dots, and hyphens. Related
+tools must be registered by the declared Plugin, and related capabilities must
+exist in the resolved catalog. Files must be UTF-8 Markdown, no larger than
+256 KiB, and must not be symlinks. An overlay reference with the same ID
+replaces its packaged counterpart.
+
+The server exposes the one merged registry through the Monitor References tab,
+`GET /api/references`, and MCP `resources/list` / `resources/read`. Markdown is
+displayed as escaped text in the Monitor. Imported or packaged guidance cannot
+override an MCP client's governing instructions, authorization, or tool policy.
+
+Operators can wrap and copy a local Markdown guide into
+`CONFIG_DIR/references/<plugin-id>/` with:
+
+```bash
+mcp-kali references import ./guide.md \
+  --id example.operator-guide \
+  --plugin local.example \
+  --title "Example operator guide" \
+  --description "Local approved use of Example." \
+  --related-tool example_print \
+  --related-capability example.printing
+```
+
+Import refuses to overwrite an existing reference. Send `SIGHUP` after a
+successful import; a reload that finds reference diagnostics retains the
+last-known-good Plugin, capability, and reference runtime.
 
 ## Capability catalog
 
@@ -145,12 +238,15 @@ documented without breaking startup.
 
 ## Validate and invoke
 
-Restart the server, then inspect:
+Start/restart the server, or send `SIGHUP` after changing an installed
+definition, then inspect:
 
 ```bash
 curl -sS http://127.0.0.1:5000/api/plugins
 curl -sS http://127.0.0.1:5000/api/plugins/diagnostics
 curl -sS http://127.0.0.1:5000/api/tools
+curl -sS http://127.0.0.1:5000/api/references
+curl -sS http://127.0.0.1:5000/api/references/diagnostics
 ```
 
 Invoke a registered tool through the generic endpoint:
@@ -163,4 +259,5 @@ curl -sS http://127.0.0.1:5000/api/tools/example_print/invoke \
 
 Scheduled operations return `202 Accepted` and a normal public job record.
 Output, cancellation, persistence, timeouts, redaction, and webhooks are owned
-by the shared scheduler.
+by the shared scheduler. Root-required tools that are not enabled return their
+elevation diagnostic rather than being scheduled.

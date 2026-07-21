@@ -21,12 +21,32 @@ capabilities:
     description: Discover responsive hosts or addresses.
     providers:
       - plugin: org.mcp-kali.nmap
-        tools: [nmap_host_discovery]
+        tools: [nmap_host_discovery, nmap_arp_host_discovery]
+  - id: network.port_scanning
+    description: Identify open TCP or UDP ports on an authorized target.
+    providers:
+      - plugin: org.mcp-kali.nmap
+        tools: [nmap_service_scan, nmap_syn_service_scan, nmap_udp_service_scan]
   - id: network.service_detection
     description: Identify services and versions exposed by a target.
     providers:
       - plugin: org.mcp-kali.nmap
-        tools: [nmap_service_scan]
+        tools: [nmap_service_scan, nmap_syn_service_scan, nmap_udp_service_scan]
+  - id: network.os_fingerprinting
+    description: Infer the operating system of an authorized target from network responses.
+    providers:
+      - plugin: org.mcp-kali.nmap
+        tools: [nmap_os_detection]
+  - id: network.tls_configuration_analysis
+    description: Inventory TLS protocol and cipher configuration.
+    providers:
+      - plugin: org.mcp-kali.nmap
+        tools: [nmap_tls_audit]
+  - id: web.service_inventory
+    description: Identify common web services and basic application metadata.
+    providers:
+      - plugin: org.mcp-kali.nmap
+        tools: [nmap_web_inventory]
   - id: web.content_discovery
     description: Discover web content, paths, or virtual hosts.
     providers:
@@ -52,4 +72,6 @@ capabilities:
   - id: network.smb_enumeration
     description: Enumerate SMB and Windows network information.
     providers:
+      - plugin: org.mcp-kali.nmap
+        tools: [nmap_smb_security_audit]
       - plugin: org.mcp-kali.enum4linux

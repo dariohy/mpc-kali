@@ -4,3 +4,4 @@ pub mod jobs;
 pub mod mcp;
 pub mod models;
 pub mod plugins;
+pub mod references;
