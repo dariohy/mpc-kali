@@ -1,6 +1,6 @@
 [package]
 name = "mcp-kali"
-version = "2.1.1"
+version = "2.2.0"
 edition = "2024"
 rust-version = "1.86"
 description = "Client and server for asynchronous Kali tool scheduling over MCP"

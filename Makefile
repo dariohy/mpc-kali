@@ -85,7 +85,7 @@ client:
 	$(CARGO) build --bin $(CLIENT_BIN)
 
 release:
-	$(CARGO) build --release
+	$(CARGO) build --release --bins
 
 verify: fmt-check check clippy test release
 

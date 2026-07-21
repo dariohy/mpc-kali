@@ -5,6 +5,8 @@ All notable changes to MCP Kali are documented here. The project follows
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-07-21
+
 ### Added
 
 - Recoverable terminal-job archiving through a previewed dashboard action,
@@ -250,7 +252,8 @@ All notable changes to MCP Kali are documented here. The project follows
 - There is no automatic job-retention policy; operators must manage the private
   state directory according to their evidence-retention requirements.
 
-[Unreleased]: https://github.com/dariohy/mcp-kali/compare/v2.1.1...HEAD
+[Unreleased]: https://github.com/dariohy/mcp-kali/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/dariohy/mcp-kali/compare/v2.1.1...v2.2.0
 [2.1.1]: https://github.com/dariohy/mcp-kali/releases/tag/v2.1.1
 [2.0.0]: https://github.com/dariohy/mcp-kali/releases/tag/v2.0.0
 [1.1.0]: https://github.com/dariohy/mcp-kali/releases/tag/v1.1.0
