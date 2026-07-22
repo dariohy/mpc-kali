@@ -1,7 +1,9 @@
 # MCP Kali 2.4.0
 
 [![CI](https://github.com/dariohy/mcp-kali/actions/workflows/ci.yml/badge.svg)](https://github.com/dariohy/mcp-kali/actions/workflows/ci.yml)
+[![Rust MSRV](https://img.shields.io/badge/rustc-1.86%2B-orange.svg?logo=rust)](Cargo.toml)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
+[![Security Policy](https://img.shields.io/badge/security-policy-blue.svg)](SECURITY.md)
 
 MCP Kali is a Rust client/server system for scheduling Kali Linux security tools
 without making an MCP agent wait for a long-running process. The server owns a
