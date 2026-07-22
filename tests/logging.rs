@@ -63,6 +63,7 @@ fn splits_json_logs_and_reopens_both_files_after_sighup() {
         ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .env("HOME", root.path())
         .env("RUST_LOG", "mcp_kali=info,tower_http=info")
         .spawn()
         .unwrap();
@@ -159,6 +160,7 @@ fn unavailable_configured_directory_falls_back_to_stdout() {
         ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .env("HOME", root.path())
         .env("RUST_LOG", "mcp_kali=info")
         .spawn()
         .unwrap();

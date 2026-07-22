@@ -2,7 +2,10 @@ use anyhow::{Result, bail};
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{Shell, generate};
 use mcp_kali::{
-    config::{default_config_dir, default_state_dir, default_system_data_dir},
+    analysis::AnalysisRoot,
+    config::{
+        default_config_dir, default_projects_dir, default_state_dir, default_system_data_dir,
+    },
     jobs::{Scheduler, default_archive_root},
     plugins::{PluginRegistry, PrivilegeElevation},
     references::{ReferenceImport, import_reference},
@@ -34,6 +37,15 @@ struct Cli {
         default_value_os_t = default_state_dir()
     )]
     state_dir: PathBuf,
+
+    /// Root for projects, including operator-managed evidence and notes plus
+    /// MCP Kali exports and native scanner artifacts.
+    #[arg(
+        long = "projects-dir",
+        env = "MCP_KALI_PROJECTS_DIR",
+        default_value_os_t = default_projects_dir()
+    )]
+    projects_dir: PathBuf,
 
     /// Directory for recoverably archived terminal job records.
     #[arg(long, env = "MCP_KALI_JOB_ARCHIVE_DIR", value_name = "PATH")]
@@ -198,9 +210,11 @@ async fn main() -> Result<()> {
     let job_archive_dir = cli
         .job_archive_dir
         .unwrap_or_else(|| default_archive_root(&cli.state_dir));
-    let scheduler = Scheduler::open_with_archive(
+    let projects = AnalysisRoot::open(&cli.projects_dir)?;
+    let scheduler = Scheduler::open_with_archive_and_analysis(
         cli.state_dir.clone(),
         job_archive_dir,
+        projects,
         cli.max_concurrency,
         cli.default_timeout,
         cli.job_archive_after_minutes,
@@ -219,6 +233,7 @@ async fn main() -> Result<()> {
         tools = registry.tools().len(),
         references = registry.references().len(),
         diagnostics = registry.diagnostics().len() + registry.reference_diagnostics().len(),
+        projects_dir = %scheduler.projects_root().display(),
         "plugin registry loaded"
     );
     let registry = Arc::new(RwLock::new(registry));

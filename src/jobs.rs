@@ -1,5 +1,9 @@
-use crate::models::{
-    Job, JobArchiveFailure, JobArchivePreview, JobArchiveResult, JobState, OutputPage, SubmitJob,
+use crate::{
+    analysis::AnalysisRoot,
+    models::{
+        Job, JobArchiveFailure, JobArchivePreview, JobArchiveResult, JobState, OutputPage,
+        SubmitJob,
+    },
 };
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::Utc;
@@ -94,6 +98,10 @@ struct PrivateJobSpec {
     argv: Vec<String>,
     #[serde(default)]
     webhook_url: Option<String>,
+    #[serde(default)]
+    stdout_export_path: Option<PathBuf>,
+    #[serde(default)]
+    stderr_export_path: Option<PathBuf>,
 }
 
 #[derive(Deserialize)]
@@ -111,6 +119,7 @@ pub struct Scheduler {
 struct Inner {
     root: PathBuf,
     archive_root: PathBuf,
+    analysis: AnalysisRoot,
     jobs: Mutex<HashMap<Uuid, Job>>,
     archive_lock: Mutex<()>,
     cancellations: Mutex<HashMap<Uuid, CancellationToken>>,
@@ -171,6 +180,29 @@ impl Scheduler {
         archive_after_minutes: u64,
         reveal_sensitive_data: bool,
     ) -> Result<Self> {
+        let analysis_root = root.join(".analysis");
+        let analysis = AnalysisRoot::open_isolated(&analysis_root)?;
+        Self::open_with_archive_and_analysis(
+            root,
+            archive_root,
+            analysis,
+            max_concurrency,
+            default_timeout,
+            archive_after_minutes,
+            reveal_sensitive_data,
+        )
+        .await
+    }
+
+    pub async fn open_with_archive_and_analysis(
+        root: PathBuf,
+        archive_root: PathBuf,
+        analysis: AnalysisRoot,
+        max_concurrency: usize,
+        default_timeout: u64,
+        archive_after_minutes: u64,
+        reveal_sensitive_data: bool,
+    ) -> Result<Self> {
         if max_concurrency == 0 {
             bail!("max_concurrency must be greater than zero");
         }
@@ -194,6 +226,7 @@ impl Scheduler {
             inner: Arc::new(Inner {
                 root,
                 archive_root,
+                analysis,
                 jobs: Mutex::new(HashMap::new()),
                 archive_lock: Mutex::new(()),
                 cancellations: Mutex::new(HashMap::new()),
@@ -215,6 +248,14 @@ impl Scheduler {
         tokio::spawn(async move { dispatcher.dispatch().await });
         scheduler.inner.notify.notify_one();
         Ok(scheduler)
+    }
+
+    pub fn projects_root(&self) -> &Path {
+        self.inner.analysis.path()
+    }
+
+    pub fn resolve_analysis_file(&self, requested: &str) -> Result<PathBuf> {
+        self.inner.analysis.resolve_file(requested)
     }
 
     pub fn archive_after_minutes(&self) -> u64 {
@@ -411,6 +452,8 @@ impl Scheduler {
                     Ok(StoredJobSpec::Current(spec)) => {
                         job.argv = spec.argv;
                         job.webhook_url = spec.webhook_url;
+                        job.stdout_export_path = spec.stdout_export_path;
+                        job.stderr_export_path = spec.stderr_export_path;
                     }
                     Ok(StoredJobSpec::Legacy(argv)) => job.argv = argv,
                     Err(_) => job.argv.clear(),
@@ -503,6 +546,15 @@ impl Scheduler {
             bail!("tool must be 1 to {MAX_TOOL_BYTES} bytes without control characters");
         }
         let webhook_configured = request.webhook_url.is_some();
+        let mut destinations = request
+            .analysis_artifacts
+            .iter()
+            .map(|artifact| artifact.path.as_str())
+            .collect::<Vec<_>>();
+        destinations.sort_unstable();
+        if destinations.windows(2).any(|pair| pair[0] == pair[1]) {
+            bail!("analysis output destinations must be unique");
+        }
         let job = Job {
             id: Uuid::new_v4(),
             tool,
@@ -517,6 +569,10 @@ impl Scheduler {
             error: None,
             webhook_configured,
             webhook_url: request.webhook_url,
+            analysis_artifacts: request.analysis_artifacts,
+            analysis_export_error: None,
+            stdout_export_path: request.stdout_export_path,
+            stderr_export_path: request.stderr_export_path,
         };
         persist_at(&self.inner.root, &job).await?;
         self.inner.jobs.lock().await.insert(job.id, job.clone());
@@ -951,6 +1007,11 @@ impl Scheduler {
         };
         self.inner.cancellations.lock().await.remove(&id);
         self.inner.process_ids.lock().await.remove(&id);
+        let analysis_export_error = self
+            .export_streams(&job)
+            .await
+            .err()
+            .map(|error| error.to_string());
         let completed = {
             let mut jobs = self.inner.jobs.lock().await;
             let job = jobs
@@ -959,6 +1020,7 @@ impl Scheduler {
             job.state = outcome.0;
             job.return_code = outcome.1;
             job.error = outcome.2;
+            job.analysis_export_error = analysis_export_error;
             job.finished_at = Some(Utc::now());
             persist_terminal_at(&self.inner.root, job).await?;
             job.clone()
@@ -976,6 +1038,27 @@ impl Scheduler {
         );
         self.send_webhook(&completed).await;
         Ok(())
+    }
+
+    async fn export_streams(&self, job: &Job) -> Result<()> {
+        let mut failures = Vec::new();
+        for (stream, destination) in [
+            ("stdout", job.stdout_export_path.as_ref()),
+            ("stderr", job.stderr_export_path.as_ref()),
+        ] {
+            let Some(destination) = destination else {
+                continue;
+            };
+            let source = self.job_dir(job.id).join(format!("{stream}.log"));
+            if let Err(error) = self.inner.analysis.copy_file(&source, destination).await {
+                failures.push(format!("{stream}: {error}"));
+            }
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            bail!("{}", failures.join("; "))
+        }
     }
 
     async fn send_webhook(&self, job: &Job) {
@@ -1237,6 +1320,8 @@ async fn persist_at(root: &Path, job: &Job) -> Result<()> {
     let private = PrivateJobSpec {
         argv: job.argv.clone(),
         webhook_url: job.webhook_url.clone(),
+        stdout_export_path: job.stdout_export_path.clone(),
+        stderr_export_path: job.stderr_export_path.clone(),
     };
     write_private(&dir.join("command.json"), &serde_json::to_vec(&private)?).await?;
     Ok(())
@@ -1281,6 +1366,9 @@ mod tests {
                 argv: vec!["printf".into(), "hello".into()],
                 timeout_seconds: None,
                 webhook_url: None,
+                stdout_export_path: None,
+                stderr_export_path: None,
+                analysis_artifacts: Vec::new(),
             })
             .await
             .unwrap();
@@ -1320,6 +1408,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn exports_captured_stream_without_removing_job_output() {
+        let temp = tempfile::tempdir().unwrap();
+        let scheduler = Scheduler::open(temp.path().into(), 1, 10).await.unwrap();
+        let destination = scheduler.resolve_analysis_file("scans/stdout.txt").unwrap();
+        let job = scheduler
+            .submit(SubmitJob {
+                tool: None,
+                argv: vec!["printf".into(), "saved output".into()],
+                timeout_seconds: None,
+                webhook_url: None,
+                stdout_export_path: Some(destination.clone()),
+                stderr_export_path: None,
+                analysis_artifacts: vec![crate::models::AnalysisArtifact {
+                    kind: "stdout_export".into(),
+                    path: destination.display().to_string(),
+                }],
+            })
+            .await
+            .unwrap();
+        for _ in 0..100 {
+            if scheduler.get(job.id).await.unwrap().state.is_terminal() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let completed = scheduler.get(job.id).await.unwrap();
+        assert_eq!(completed.state, JobState::Succeeded);
+        assert!(completed.analysis_export_error.is_none());
+        assert_eq!(
+            fs::read_to_string(destination).await.unwrap(),
+            "saved output"
+        );
+        assert_eq!(
+            scheduler
+                .output(job.id, "stdout", 0, 100)
+                .await
+                .unwrap()
+                .data,
+            "saved output"
+        );
+    }
+
+    #[tokio::test]
     async fn archives_only_old_terminal_jobs_and_preserves_evidence() {
         let temp = tempfile::tempdir().unwrap();
         let job_root = temp.path().join("jobs");
@@ -1334,6 +1465,9 @@ mod tests {
                 argv: vec!["printf".into(), "archive-me".into()],
                 timeout_seconds: None,
                 webhook_url: None,
+                stdout_export_path: None,
+                stderr_export_path: None,
+                analysis_artifacts: Vec::new(),
             })
             .await
             .unwrap();
@@ -1362,6 +1496,9 @@ mod tests {
                 argv: vec!["sleep".into(), "1".into()],
                 timeout_seconds: None,
                 webhook_url: None,
+                stdout_export_path: None,
+                stderr_export_path: None,
+                analysis_artifacts: Vec::new(),
             })
             .await
             .unwrap();
@@ -1427,6 +1564,9 @@ mod tests {
                 argv: vec!["printf".into(), "original".into()],
                 timeout_seconds: None,
                 webhook_url: None,
+                stdout_export_path: None,
+                stderr_export_path: None,
+                analysis_artifacts: Vec::new(),
             })
             .await
             .unwrap();
@@ -1466,6 +1606,9 @@ mod tests {
                 argv: vec!["sleep".into(), "0.2".into()],
                 timeout_seconds: None,
                 webhook_url: None,
+                stdout_export_path: None,
+                stderr_export_path: None,
+                analysis_artifacts: Vec::new(),
             })
             .await
             .unwrap();
@@ -1475,6 +1618,9 @@ mod tests {
                 argv: vec!["printf".into(), "must-not-run".into()],
                 timeout_seconds: None,
                 webhook_url: None,
+                stdout_export_path: None,
+                stderr_export_path: None,
+                analysis_artifacts: Vec::new(),
             })
             .await
             .unwrap();
@@ -1506,6 +1652,9 @@ mod tests {
                 argv: vec!["sleep".into(), "10".into()],
                 timeout_seconds: None,
                 webhook_url: None,
+                stdout_export_path: None,
+                stderr_export_path: None,
+                analysis_artifacts: Vec::new(),
             })
             .await
             .unwrap();
@@ -1550,6 +1699,9 @@ mod tests {
                 argv: vec!["sleep".into(), "1".into()],
                 timeout_seconds: None,
                 webhook_url: None,
+                stdout_export_path: None,
+                stderr_export_path: None,
+                analysis_artifacts: Vec::new(),
             })
             .await
             .unwrap();
@@ -1559,6 +1711,9 @@ mod tests {
                 argv: vec!["sleep".into(), "1".into()],
                 timeout_seconds: None,
                 webhook_url: None,
+                stdout_export_path: None,
+                stderr_export_path: None,
+                analysis_artifacts: Vec::new(),
             })
             .await
             .unwrap();
@@ -1601,6 +1756,9 @@ mod tests {
                 argv: vec!["sleep".into(), "0.2".into()],
                 timeout_seconds: None,
                 webhook_url: None,
+                stdout_export_path: None,
+                stderr_export_path: None,
+                analysis_artifacts: Vec::new(),
             })
             .await
             .unwrap();
@@ -1610,6 +1768,9 @@ mod tests {
                 argv: vec!["sleep".into(), "1".into()],
                 timeout_seconds: None,
                 webhook_url: None,
+                stdout_export_path: None,
+                stderr_export_path: None,
+                analysis_artifacts: Vec::new(),
             })
             .await
             .unwrap();
@@ -1628,6 +1789,9 @@ mod tests {
                 argv: vec!["sleep".into(), "1".into()],
                 timeout_seconds: None,
                 webhook_url: None,
+                stdout_export_path: None,
+                stderr_export_path: None,
+                analysis_artifacts: Vec::new(),
             })
             .await
             .unwrap();
@@ -1658,6 +1822,9 @@ mod tests {
                 argv: vec!["sleep".into(), "10".into()],
                 timeout_seconds: None,
                 webhook_url: None,
+                stdout_export_path: None,
+                stderr_export_path: None,
+                analysis_artifacts: Vec::new(),
             })
             .await
             .unwrap();
@@ -1667,6 +1834,9 @@ mod tests {
                 argv: vec!["sleep".into(), "10".into()],
                 timeout_seconds: None,
                 webhook_url: None,
+                stdout_export_path: None,
+                stderr_export_path: None,
+                analysis_artifacts: Vec::new(),
             })
             .await
             .unwrap();
@@ -1692,6 +1862,9 @@ mod tests {
                     argv: vec!["true".into()],
                     timeout_seconds: None,
                     webhook_url: None,
+                    stdout_export_path: None,
+                    stderr_export_path: None,
+                    analysis_artifacts: Vec::new(),
                 })
                 .await
                 .is_err()
@@ -1718,6 +1891,9 @@ mod tests {
                 argv: vec!["printf".into(), "x".repeat(MAX_ARG_BYTES + 1)],
                 timeout_seconds: None,
                 webhook_url: None,
+                stdout_export_path: None,
+                stderr_export_path: None,
+                analysis_artifacts: Vec::new(),
             })
             .await;
         assert!(result.is_err());

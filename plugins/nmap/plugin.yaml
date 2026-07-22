@@ -3,7 +3,7 @@ kind: Plugin
 metadata:
   id: org.mcp-kali.nmap
   name: Nmap
-  version: 2.0.1
+  version: 2.1.0
   description: Safe, repeatable Nmap discovery, inventory, and configuration-audit profiles.
 categories: [information-gathering]
 tags: [network, discovery, inventory]
@@ -20,6 +20,11 @@ tools:
       additionalProperties: false
       required: [target]
       properties:
+        output_basename:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Relative or in-root absolute basename for Nmap -oA normal, XML, and grepable files.
         target: {$ref: "#/$defs/target"}
       $defs:
         target:
@@ -29,7 +34,14 @@ tools:
           pattern: "^[A-Za-z0-9][A-Za-z0-9.:_/%-]{0,252}$"
     execution:
       program: nmap
-      args: [--unprivileged, -sn, "{{target}}"]
+      args:
+        - --unprivileged
+        - -sn
+        - when: output_basename
+          args: [-oA, "{{output_basename}}"]
+        - "{{target}}"
+      analysis_paths:
+        output_basename: [.nmap, .xml, .gnmap]
     policy:
       timeout_seconds: 600
   - metadata:
@@ -42,6 +54,11 @@ tools:
       additionalProperties: false
       required: [target]
       properties:
+        output_basename:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Relative or in-root absolute basename for Nmap -oA normal, XML, and grepable files.
         target:
           type: string
           minLength: 1
@@ -49,7 +66,14 @@ tools:
           pattern: "^[A-Za-z0-9][A-Za-z0-9.:_/%-]{0,252}$"
     execution:
       program: nmap
-      args: [-sn, -PR, "{{target}}"]
+      args:
+        - -sn
+        - -PR
+        - when: output_basename
+          args: [-oA, "{{output_basename}}"]
+        - "{{target}}"
+      analysis_paths:
+        output_basename: [.nmap, .xml, .gnmap]
     requirements:
       privilege: root
     policy:
@@ -64,6 +88,11 @@ tools:
       additionalProperties: false
       required: [target]
       properties:
+        output_basename:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Relative or in-root absolute basename for Nmap -oA normal, XML, and grepable files.
         target:
           type: string
           minLength: 1
@@ -82,7 +111,11 @@ tools:
         - -sV
         - when: ports
           args: [-p, "{{ports}}"]
+        - when: output_basename
+          args: [-oA, "{{output_basename}}"]
         - "{{target}}"
+      analysis_paths:
+        output_basename: [.nmap, .xml, .gnmap]
     policy:
       timeout_seconds: 1800
   - metadata:
@@ -95,6 +128,11 @@ tools:
       additionalProperties: false
       required: [target]
       properties:
+        output_basename:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Relative or in-root absolute basename for Nmap -oA normal, XML, and grepable files.
         target:
           type: string
           minLength: 1
@@ -112,7 +150,11 @@ tools:
         - -sV
         - when: ports
           args: [-p, "{{ports}}"]
+        - when: output_basename
+          args: [-oA, "{{output_basename}}"]
         - "{{target}}"
+      analysis_paths:
+        output_basename: [.nmap, .xml, .gnmap]
     requirements:
       privilege: root
     policy:
@@ -127,6 +169,11 @@ tools:
       additionalProperties: false
       required: [target, ports]
       properties:
+        output_basename:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Relative or in-root absolute basename for Nmap -oA normal, XML, and grepable files.
         target:
           type: string
           minLength: 1
@@ -139,7 +186,16 @@ tools:
           pattern: '^[0-9]{1,5}(-[0-9]{1,5})?(,[0-9]{1,5}(-[0-9]{1,5})?)*$'
     execution:
       program: nmap
-      args: [-sU, -sV, -p, "{{ports}}", "{{target}}"]
+      args:
+        - -sU
+        - -sV
+        - -p
+        - "{{ports}}"
+        - when: output_basename
+          args: [-oA, "{{output_basename}}"]
+        - "{{target}}"
+      analysis_paths:
+        output_basename: [.nmap, .xml, .gnmap]
     requirements:
       privilege: root
     policy:
@@ -154,6 +210,11 @@ tools:
       additionalProperties: false
       required: [target]
       properties:
+        output_basename:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Relative or in-root absolute basename for Nmap -oA normal, XML, and grepable files.
         target:
           type: string
           minLength: 1
@@ -161,7 +222,15 @@ tools:
           pattern: "^[A-Za-z0-9][A-Za-z0-9.:_/%-]{0,252}$"
     execution:
       program: nmap
-      args: [-sS, -O, --osscan-guess, "{{target}}"]
+      args:
+        - -sS
+        - -O
+        - --osscan-guess
+        - when: output_basename
+          args: [-oA, "{{output_basename}}"]
+        - "{{target}}"
+      analysis_paths:
+        output_basename: [.nmap, .xml, .gnmap]
     requirements:
       privilege: root
     policy:
@@ -176,6 +245,11 @@ tools:
       additionalProperties: false
       required: [target]
       properties:
+        output_basename:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Relative or in-root absolute basename for Nmap -oA normal, XML, and grepable files.
         target:
           type: string
           minLength: 1
@@ -183,7 +257,19 @@ tools:
           pattern: "^[A-Za-z0-9][A-Za-z0-9.:_/%-]{0,252}$"
     execution:
       program: nmap
-      args: [--unprivileged, -sT, -sV, -p, "443,8443", --script, ssl-enum-ciphers, "{{target}}"]
+      args:
+        - --unprivileged
+        - -sT
+        - -sV
+        - -p
+        - "443,8443"
+        - --script
+        - ssl-enum-ciphers
+        - when: output_basename
+          args: [-oA, "{{output_basename}}"]
+        - "{{target}}"
+      analysis_paths:
+        output_basename: [.nmap, .xml, .gnmap]
     policy:
       timeout_seconds: 1800
   - metadata:
@@ -196,6 +282,11 @@ tools:
       additionalProperties: false
       required: [target]
       properties:
+        output_basename:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Relative or in-root absolute basename for Nmap -oA normal, XML, and grepable files.
         target:
           type: string
           minLength: 1
@@ -203,7 +294,18 @@ tools:
           pattern: "^[A-Za-z0-9][A-Za-z0-9.:_/%-]{0,252}$"
     execution:
       program: nmap
-      args: [--unprivileged, -sT, -p, "445", --script, "smb-protocols,smb-security-mode,smb2-security-mode", "{{target}}"]
+      args:
+        - --unprivileged
+        - -sT
+        - -p
+        - "445"
+        - --script
+        - "smb-protocols,smb-security-mode,smb2-security-mode"
+        - when: output_basename
+          args: [-oA, "{{output_basename}}"]
+        - "{{target}}"
+      analysis_paths:
+        output_basename: [.nmap, .xml, .gnmap]
     policy:
       timeout_seconds: 1800
   - metadata:
@@ -216,6 +318,11 @@ tools:
       additionalProperties: false
       required: [target]
       properties:
+        output_basename:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Relative or in-root absolute basename for Nmap -oA normal, XML, and grepable files.
         target:
           type: string
           minLength: 1
@@ -223,6 +330,18 @@ tools:
           pattern: "^[A-Za-z0-9][A-Za-z0-9.:_/%-]{0,252}$"
     execution:
       program: nmap
-      args: [--unprivileged, -sT, -sV, -p, "80,443,8080,8443", --script, "http-title,http-auth", "{{target}}"]
+      args:
+        - --unprivileged
+        - -sT
+        - -sV
+        - -p
+        - "80,443,8080,8443"
+        - --script
+        - "http-title,http-auth"
+        - when: output_basename
+          args: [-oA, "{{output_basename}}"]
+        - "{{target}}"
+      analysis_paths:
+        output_basename: [.nmap, .xml, .gnmap]
     policy:
       timeout_seconds: 1800

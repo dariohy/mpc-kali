@@ -8,6 +8,7 @@ INSTALL_DIR ?= $(MCP_KALI_HOME)/bin
 CONFIG_DIR ?= $(MCP_KALI_HOME)/etc
 DATA_DIR ?= $(MCP_KALI_HOME)/share
 STATE_DIR ?= $(MCP_KALI_HOME)/var/lib/jobs
+PROJECTS_DIR ?= $(HOME)/projects
 ARCHIVE_DIR ?= $(MCP_KALI_HOME)/var/lib/archive/jobs
 LOG_DIR ?= $(MCP_KALI_HOME)/var/log/mcp-kali
 PLUGIN_DIR := $(DATA_DIR)/plugins
@@ -26,6 +27,7 @@ SYSTEM_PLUGIN_DIR := $(SYSTEM_DATA_DIR)/plugins
 SYSTEM_REFERENCE_OVERLAY_DIR := $(SYSTEM_CONFIG_DIR)/references
 SYSTEM_STATE_DIR ?= /var/lib/mcp-kali/jobs
 SYSTEM_ARCHIVE_DIR ?= /var/lib/mcp-kali/archive/jobs
+SYSTEM_PROJECTS_DIR_NAME ?= projects
 SYSTEMD_UNIT_DIR ?= /usr/lib/systemd/system
 LOGROTATE_DIR ?= /etc/logrotate.d
 MCP_KALI_USER ?= kali
@@ -148,7 +150,7 @@ install-local: release
 	@test "$$(id -u)" -ne 0 || { echo "install-local is for a non-root user; use make install MCP_KALI_USER=<authorized-user> as root" >&2; exit 2; }
 	mkdir -p "$(INSTALL_DIR)"
 	mkdir -p "$(PLUGIN_DIR)" "$(CONFIG_DIR)/plugins" "$(REFERENCE_OVERLAY_DIR)"
-	install -d -m 0700 "$(STATE_DIR)" "$(ARCHIVE_DIR)" "$(LOG_DIR)"
+	install -d -m 0700 "$(STATE_DIR)" "$(PROJECTS_DIR)" "$(ARCHIVE_DIR)" "$(LOG_DIR)"
 	mkdir -p "$(LOCAL_BIN_DIR)"
 	@if [ ! -e "$(CONFIG_FILE)" ] && [ -e "$(LEGACY_CONFIG_FILE)" ]; then \
 		mv "$(LEGACY_CONFIG_FILE)" "$(CONFIG_FILE)"; \
@@ -157,6 +159,7 @@ install-local: release
 	@if [ ! -e "$(CONFIG_FILE)" ]; then \
 		sed -e 's|@MCP_KALI_HOME@|$(abspath $(MCP_KALI_HOME))|g' \
 			-e 's|@MCP_KALI_STATE_DIR@|$(abspath $(STATE_DIR))|g' \
+			-e 's|@MCP_KALI_PROJECTS_DIR@|$(abspath $(PROJECTS_DIR))|g' \
 			-e 's|@MCP_KALI_LOG_DIR@|$(abspath $(LOG_DIR))|g' \
 			-e 's|@MCP_KALI_JOB_ARCHIVE_DIR@|$(abspath $(ARCHIVE_DIR))|g' \
 			-e 's|@MCP_KALI_SYSTEM_DATA_DIR@|$(abspath $(DATA_DIR))|g' \
@@ -225,7 +228,8 @@ install-system: release
 	@getent group "$(MCP_KALI_GROUP)" >/dev/null 2>&1 || { echo "service group $(MCP_KALI_GROUP) does not exist" >&2; exit 2; }
 	@service_home="$$(getent passwd "$(MCP_KALI_USER)" | awk -F: 'NR == 1 { print $$6 }')"; test -n "$$service_home" && test -d "$$service_home" || { echo "service user $(MCP_KALI_USER) has no usable home directory" >&2; exit 2; }
 	install -d -m 0755 "$(SYSTEM_BIN_DIR)" "$(SYSTEM_PLUGIN_DIR)" "$(SYSTEM_CONFIG_DIR)/plugins" "$(SYSTEM_REFERENCE_OVERLAY_DIR)" "$(SYSTEMD_UNIT_DIR)" "$(LOGROTATE_DIR)"
-	install -d -o "$(MCP_KALI_USER)" -g "$(MCP_KALI_GROUP)" -m 0700 "$(SYSTEM_STATE_DIR)" "$(SYSTEM_ARCHIVE_DIR)" "$(SYSTEM_LOG_DIR)"
+	@service_home="$$(getent passwd "$(MCP_KALI_USER)" | awk -F: 'NR == 1 { print $$6 }')"; \
+		install -d -o "$(MCP_KALI_USER)" -g "$(MCP_KALI_GROUP)" -m 0700 "$(SYSTEM_STATE_DIR)" "$(SYSTEM_ARCHIVE_DIR)" "$(SYSTEM_LOG_DIR)" "$$service_home/$(SYSTEM_PROJECTS_DIR_NAME)"
 	install -m 0755 "target/release/$(SERVER_BIN)" "$(SYSTEM_BIN_DIR)/$(SERVER_BIN)"
 	install -m 0755 "target/release/$(CLIENT_BIN)" "$(SYSTEM_BIN_DIR)/$(CLIENT_BIN)"
 	cp -R plugins/. "$(SYSTEM_PLUGIN_DIR)/"
@@ -237,6 +241,7 @@ install-system: release
 		service_home="$$(getent passwd "$(MCP_KALI_USER)" | awk -F: 'NR == 1 { print $$6 }')"; \
 		sed -e 's|@MCP_KALI_HOME@|'"$$service_home"'|g' \
 			-e 's|@MCP_KALI_STATE_DIR@|$(SYSTEM_STATE_DIR)|g' \
+			-e 's|@MCP_KALI_PROJECTS_DIR@|'"$$service_home/$(SYSTEM_PROJECTS_DIR_NAME)"'|g' \
 			-e 's|@MCP_KALI_LOG_DIR@|$(SYSTEM_LOG_DIR)|g' \
 			-e 's|@MCP_KALI_JOB_ARCHIVE_DIR@|$(SYSTEM_ARCHIVE_DIR)|g' \
 			-e 's|@MCP_KALI_SYSTEM_DATA_DIR@|$(SYSTEM_DATA_DIR)|g' \

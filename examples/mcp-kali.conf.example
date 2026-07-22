@@ -27,6 +27,13 @@ MCP_KALI_BIND=127.0.0.1:5000
 # Private durable job state directory.
 # MCP_KALI_STATE_DIR=~/.mcp-kali/var/lib/jobs
 
+# Root for operator-managed projects, including evidence, notes, generic
+# stdout/stderr exports, and native scanner artifacts. Relative invocation paths
+# are resolved beneath this directory; absolute paths must also remain beneath
+# it. The configured root itself must be within the running user's HOME
+# directory. Existing symlinks in output paths are rejected.
+# MCP_KALI_PROJECTS_DIR=~/projects
+
 # Structured server logging. The directory must already exist, be writable,
 # and not be a symlink. TRACE/DEBUG/INFO go exclusively to mcp-kali.jsonl;
 # WARN/ERROR go exclusively to mcp-kali.error.jsonl. Both files are 0600 below

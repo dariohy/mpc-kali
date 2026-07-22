@@ -1,6 +1,6 @@
 use crate::{
     jobs::Scheduler,
-    models::SubmitJob,
+    models::{AnalysisArtifact, SubmitJob},
     references::{ReferenceDiagnostic, ReferenceDocument, ReferenceRegistry, ReferenceSummary},
 };
 use anyhow::{Context, Result, anyhow, bail};
@@ -218,6 +218,10 @@ struct ExecutionDefinition {
     program: String,
     #[serde(default)]
     args: Vec<ArgumentTemplate>,
+    /// Top-level string inputs that are resolved beneath the configured
+    /// projects root. Each suffix describes a native file the tool will write.
+    #[serde(default)]
+    analysis_paths: BTreeMap<String, Vec<String>>,
     #[serde(skip)]
     timeout_seconds: Option<u64>,
 }
@@ -263,6 +267,10 @@ pub struct InvokeRequest {
     pub timeout_seconds: Option<u64>,
     #[serde(default)]
     pub webhook_url: Option<String>,
+    #[serde(default)]
+    pub save_stdout_to: Option<String>,
+    #[serde(default)]
+    pub save_stderr_to: Option<String>,
 }
 
 fn empty_object() -> Value {
@@ -429,24 +437,41 @@ impl PluginRegistry {
             tool.handler,
             ToolHandler::Declarative(_) | ToolHandler::ExecuteCommand
         );
-        if !scheduled && (request.timeout_seconds.is_some() || request.webhook_url.is_some()) {
-            bail!("timeout_seconds and webhook_url are valid only for scheduled tools");
+        if !scheduled
+            && (request.timeout_seconds.is_some()
+                || request.webhook_url.is_some()
+                || request.save_stdout_to.is_some()
+                || request.save_stderr_to.is_some())
+        {
+            bail!(
+                "timeout_seconds, webhook_url, save_stdout_to, and save_stderr_to are valid only for scheduled tools"
+            );
         }
         validate_arguments(&tool.input_schema, &request.arguments)?;
         match &tool.handler {
             ToolHandler::Declarative(execution) => {
-                let argv = self.prepare_declarative_argv(tool, execution, &request.arguments)?;
+                let (stdout_export_path, stderr_export_path, mut analysis_artifacts) =
+                    prepare_stream_exports(&request, scheduler)?;
+                let (resolved_arguments, native_artifacts) =
+                    prepare_native_artifacts(execution, &request.arguments, scheduler)?;
+                let argv = self.prepare_declarative_argv(tool, execution, &resolved_arguments)?;
+                analysis_artifacts.extend(native_artifacts);
                 let job = scheduler
                     .submit(SubmitJob {
                         tool: Some(name.to_owned()),
                         argv,
                         timeout_seconds: request.timeout_seconds.or(execution.timeout_seconds),
                         webhook_url: request.webhook_url,
+                        stdout_export_path,
+                        stderr_export_path,
+                        analysis_artifacts,
                     })
                     .await?;
                 Ok(InvokeResponse::Accepted(json!(job)))
             }
             ToolHandler::ExecuteCommand => {
+                let (stdout_export_path, stderr_export_path, analysis_artifacts) =
+                    prepare_stream_exports(&request, scheduler)?;
                 let program = required_string(&request.arguments, "program")?;
                 let args = request
                     .arguments
@@ -469,6 +494,9 @@ impl PluginRegistry {
                         argv,
                         timeout_seconds: request.timeout_seconds,
                         webhook_url: request.webhook_url,
+                        stdout_export_path,
+                        stderr_export_path,
+                        analysis_artifacts,
                     })
                     .await?;
                 Ok(InvokeResponse::Accepted(json!(job)))
@@ -1102,11 +1130,14 @@ fn validate_tool(tool: &ToolDocument) -> Result<()> {
         .get("properties")
         .and_then(Value::as_object)
         .is_some_and(|properties| {
-            properties.contains_key("timeout_seconds") || properties.contains_key("webhook_url")
+            properties.contains_key("timeout_seconds")
+                || properties.contains_key("webhook_url")
+                || properties.contains_key("save_stdout_to")
+                || properties.contains_key("save_stderr_to")
         })
     {
         bail!(
-            "input_schema properties timeout_seconds and webhook_url are reserved by the runtime"
+            "input_schema properties timeout_seconds, webhook_url, save_stdout_to, and save_stderr_to are reserved by the runtime"
         );
     }
     validate_program(&tool.execution.program)?;
@@ -1127,6 +1158,34 @@ fn validate_tool(tool: &ToolDocument) -> Result<()> {
                 for value in args {
                     validate_template_value(value)?;
                 }
+            }
+        }
+    }
+    let properties = tool
+        .input_schema
+        .get("properties")
+        .and_then(Value::as_object);
+    for (field, suffixes) in &tool.execution.analysis_paths {
+        validate_field_name(field)?;
+        let property = properties
+            .and_then(|properties| properties.get(field))
+            .with_context(|| {
+                format!("execution.analysis_paths field {field} is not in input_schema")
+            })?;
+        if property.get("type") != Some(&Value::String("string".into())) {
+            bail!("execution.analysis_paths field {field} must have type: string");
+        }
+        if suffixes.is_empty() {
+            bail!("execution.analysis_paths field {field} must declare at least one suffix");
+        }
+        for suffix in suffixes {
+            if suffix.len() > 32
+                || suffix.chars().any(char::is_control)
+                || suffix.contains('/')
+                || suffix.contains('\\')
+                || suffix.contains("..")
+            {
+                bail!("execution.analysis_paths suffix for {field} is unsafe");
             }
         }
     }
@@ -1181,8 +1240,92 @@ fn published_schema(schema: &Value, handler: &ToolHandler) -> Value {
             "webhook_url".into(),
             json!({"type":"string","format":"uri"}),
         );
+        properties.insert(
+            "save_stdout_to".into(),
+            json!({"type":"string","minLength":1,"maxLength":4096,"description":"Copy captured stdout after completion to this relative path, or absolute path within the configured projects directory."}),
+        );
+        properties.insert(
+            "save_stderr_to".into(),
+            json!({"type":"string","minLength":1,"maxLength":4096,"description":"Copy captured stderr after completion to this relative path, or absolute path within the configured projects directory."}),
+        );
     }
     schema
+}
+
+fn prepare_stream_exports(
+    request: &InvokeRequest,
+    scheduler: &Scheduler,
+) -> Result<(Option<PathBuf>, Option<PathBuf>, Vec<AnalysisArtifact>)> {
+    let stdout = request
+        .save_stdout_to
+        .as_deref()
+        .map(|path| scheduler.resolve_analysis_file(path))
+        .transpose()?;
+    let stderr = request
+        .save_stderr_to
+        .as_deref()
+        .map(|path| scheduler.resolve_analysis_file(path))
+        .transpose()?;
+    let mut artifacts = Vec::new();
+    for (kind, path) in [
+        ("stdout_export", stdout.as_ref()),
+        ("stderr_export", stderr.as_ref()),
+    ] {
+        if let Some(path) = path {
+            artifacts.push(AnalysisArtifact {
+                kind: kind.into(),
+                path: path.display().to_string(),
+            });
+        }
+    }
+    Ok((stdout, stderr, artifacts))
+}
+
+fn prepare_native_artifacts(
+    execution: &ExecutionDefinition,
+    arguments: &Value,
+    scheduler: &Scheduler,
+) -> Result<(Value, Vec<AnalysisArtifact>)> {
+    let mut resolved_arguments = arguments.clone();
+    let object = resolved_arguments
+        .as_object_mut()
+        .context("tool arguments must be an object")?;
+    let mut artifacts = Vec::new();
+    for (field, suffixes) in &execution.analysis_paths {
+        let Some(requested) = object.get(field).and_then(Value::as_str) else {
+            continue;
+        };
+        let base = scheduler.resolve_analysis_file(requested)?;
+        let base_text = base
+            .to_str()
+            .context("resolved analysis path is not UTF-8")?
+            .to_owned();
+        object.insert(field.clone(), Value::String(base_text));
+        for suffix in suffixes {
+            let mut native_path = base.as_os_str().to_os_string();
+            native_path.push(suffix);
+            let native_path = native_path
+                .into_string()
+                .map_err(|_| anyhow!("resolved native artifact path is not UTF-8"))?;
+            let native_path = scheduler.resolve_analysis_file(&native_path)?;
+            artifacts.push(AnalysisArtifact {
+                kind: native_artifact_kind(field, suffix),
+                path: native_path.display().to_string(),
+            });
+        }
+    }
+    Ok((resolved_arguments, artifacts))
+}
+
+fn native_artifact_kind(field: &str, suffix: &str) -> String {
+    let format = match suffix {
+        ".nmap" => "normal",
+        ".xml" => "xml",
+        ".gnmap" => "grepable",
+        "" => field.strip_prefix("output_").unwrap_or(field),
+        _ => suffix.trim_start_matches('.'),
+    };
+    format!("native_{format}")
 }
 
 fn render_value(template: &str, arguments: &Value) -> Result<String> {
@@ -1577,6 +1720,7 @@ tools:
                     args: vec!["-p".into(), "{{port}}".into()],
                 },
             ],
+            analysis_paths: BTreeMap::new(),
             timeout_seconds: None,
         };
         assert_eq!(
@@ -1587,6 +1731,42 @@ tools:
         );
         assert!(validate_template_value("--host={{target}}").is_err());
         assert!(validate_program("bash").is_err());
+    }
+
+    #[tokio::test]
+    async fn native_analysis_paths_are_resolved_and_listed() {
+        let jobs = tempdir().unwrap();
+        let scheduler = Scheduler::open(jobs.path().into(), 1, 10).await.unwrap();
+        let execution = ExecutionDefinition {
+            program: "nmap".into(),
+            args: vec![
+                ArgumentTemplate::Conditional {
+                    when: "output_basename".into(),
+                    args: vec!["-oA".into(), "{{output_basename}}".into()],
+                },
+                ArgumentTemplate::Value("{{target}}".into()),
+            ],
+            analysis_paths: BTreeMap::from([(
+                "output_basename".into(),
+                vec![".nmap".into(), ".xml".into(), ".gnmap".into()],
+            )]),
+            timeout_seconds: None,
+        };
+        let (arguments, artifacts) = prepare_native_artifacts(
+            &execution,
+            &json!({"target":"127.0.0.1","output_basename":"scans/loopback"}),
+            &scheduler,
+        )
+        .unwrap();
+        let rendered = execution.render(&arguments).unwrap();
+        assert_eq!(rendered[1], "-oA");
+        assert!(rendered[2].ends_with("scans/loopback"));
+        assert_eq!(artifacts.len(), 3);
+        assert!(
+            artifacts
+                .iter()
+                .any(|artifact| artifact.path.ends_with("loopback.xml"))
+        );
     }
 
     #[test]
@@ -1613,6 +1793,7 @@ tools:
         let execution = ExecutionDefinition {
             program: "nmap".into(),
             args: vec![ArgumentTemplate::Value("-sn".into())],
+            analysis_paths: BTreeMap::new(),
             timeout_seconds: None,
         };
         let root_tool = RegisteredTool {
@@ -1630,6 +1811,7 @@ tools:
             handler: ToolHandler::Declarative(ExecutionDefinition {
                 program: "nikto".into(),
                 args: Vec::new(),
+                analysis_paths: BTreeMap::new(),
                 timeout_seconds: None,
             }),
             ..root_tool.clone()
@@ -1672,6 +1854,7 @@ tools:
         let execution = ExecutionDefinition {
             program: "nmap".into(),
             args: vec![ArgumentTemplate::Value("-sn".into())],
+            analysis_paths: BTreeMap::new(),
             timeout_seconds: None,
         };
         let tool = RegisteredTool {
@@ -1710,6 +1893,7 @@ tools:
         let execution = ExecutionDefinition {
             program: "nmap".into(),
             args: Vec::new(),
+            analysis_paths: BTreeMap::new(),
             timeout_seconds: None,
         };
         let tool = RegisteredTool {
@@ -1863,6 +2047,8 @@ execution: {program: printf, args: []}
                     arguments: json!({"value":"hello; not a shell"}),
                     timeout_seconds: None,
                     webhook_url: None,
+                    save_stdout_to: Some("reports/example.txt".into()),
+                    save_stderr_to: None,
                 },
                 &scheduler,
             )
@@ -1882,6 +2068,11 @@ execution: {program: printf, args: []}
             scheduler.output(id, "stdout", 0, 1024).await.unwrap().data,
             "hello; not a shell"
         );
+        let exported = scheduler
+            .resolve_analysis_file("reports/example.txt")
+            .unwrap();
+        assert_eq!(fs::read_to_string(exported).unwrap(), "hello; not a shell");
+        assert_eq!(scheduler.get(id).await.unwrap().analysis_artifacts.len(), 1);
     }
 
     #[test]

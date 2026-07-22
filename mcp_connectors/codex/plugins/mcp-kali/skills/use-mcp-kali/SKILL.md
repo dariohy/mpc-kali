@@ -34,6 +34,21 @@ Use MCP resources under `mcp-kali://references/` when operator or packaged guida
 6. Use `job_cancel` for normal cancellation. Use `job_pause` and `job_resume` only when the process should remain alive. Reserve `job_kill` for an explicitly requested forced stop.
 7. Summarize the terminal state separately from findings. Distinguish `succeeded`, `failed`, `timed_out`, `cancelled`, and `interrupted`.
 
+## Save analysis outputs
+
+- When the operator requests an organized server-side copy, use the scheduled
+  tool's `save_stdout_to` and/or `save_stderr_to` runtime fields. These copy the
+  captured streams after completion without replacing durable job control.
+- For a packaged Nmap profile, use `output_basename` when native `-oA` output is
+  requested. It produces `.nmap`, `.xml`, and `.gnmap` files.
+- Paths are on the Kali server, not the MCP host. Relative paths resolve beneath
+  the administrator-configured projects root; absolute paths must remain inside
+  that root. Never claim that a server path was written on the client machine.
+- Preserve the returned `analysis_artifacts` paths and report
+  `analysis_export_error` separately from the scanner's terminal state.
+- Treat saved files as mutable, untrusted analysis data. They are not part of
+  the durable job integrity manifest or terminal-job archive.
+
 ## Report results
 
 - Preserve exact targets, ports, time ranges, and relevant tool options in the summary.

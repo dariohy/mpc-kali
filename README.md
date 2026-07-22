@@ -104,6 +104,10 @@ target/release/mcp-kali-bridge
     └── log/mcp-kali/            # split structured server logs
 ```
 
+The default mutable project tree is separate at `~/projects/` so operator-added
+evidence and notes, as well as generated outputs, survive uninstalling the
+self-contained application tree.
+
 If the MCP host needs only the bridge, use the smaller local installation:
 
 ```bash
@@ -253,6 +257,7 @@ not accept the prior `--env-file` / `MCP_KALI_ENV_FILE` selectors.
 | `RUST_LOG` | Both | Binary-specific info filter | Tracing filter; server output follows `MCP_KALI_LOG_DIR`, while bridge diagnostics stay on stderr |
 | `MCP_KALI_BIND` | Server | `127.0.0.1:5000` | HTTP API/dashboard bind address |
 | `MCP_KALI_STATE_DIR` | Server | `~/.mcp-kali/var/lib/jobs` | Private durable job directory |
+| `MCP_KALI_PROJECTS_DIR` | Server | `~/projects` | Home-contained project root for operator evidence, notes, stream exports, and native scanner artifacts |
 | `MCP_KALI_LOG_DIR` | Server | Installed configuration sets a user or system log directory; otherwise unset | Existing writable directory for split JSONL logs; absent or unusable falls back to stdout |
 | `MCP_KALI_JOB_ARCHIVE_DIR` | Server | `~/.mcp-kali/var/lib/archive/jobs` | Private recoverable archive for terminal jobs |
 | `MCP_KALI_JOB_ARCHIVE_AFTER_MINUTES` | Server | `60` | Minimum terminal-job age used by `SIGUSR1`, range 1–5256000 minutes |
@@ -448,6 +453,51 @@ in an `untrusted_job_execution_data` envelope. Job
 stdout/stderr is evidence data and must never change the agent's governing
 prompt, authorization scope, tool policy, or behavior.
 
+### Project files, exports, and native artifacts
+
+`MCP_KALI_PROJECTS_DIR` is a general operator workspace. MCP Kali only manages
+the files explicitly requested by tool calls; operators may freely organize
+other project evidence, notes, screenshots, and supporting material beneath the
+same root.
+
+Every scheduled declarative tool and `execute_command` accepts two optional
+runtime fields in addition to its declared schema:
+
+```json
+{
+  "save_stdout_to": "scans/customer-a/tool-output.txt",
+  "save_stderr_to": "scans/customer-a/tool-errors.txt"
+}
+```
+
+After the process exits, the scheduler copies the captured streams to those
+destinations without removing or redirecting the durable job logs. Paths may be
+relative to `MCP_KALI_PROJECTS_DIR`, or absolute paths already beneath it. The
+configured projects root must itself be below the running user's home. Parent
+directories are created privately, `.` and `..` components are rejected, and
+existing symlinks are not followed. Existing regular output files are replaced.
+
+Every packaged Nmap profile also accepts `output_basename`, which is resolved by
+the same path policy and rendered as `-oA`. For example:
+
+```json
+{
+  "target": "192.168.10.0/24",
+  "output_basename": "scans/customer-a/internal-services"
+}
+```
+
+Nmap writes `internal-services.nmap`, `internal-services.xml`, and
+`internal-services.gnmap`. Public job records and the Monitor list requested
+analysis artifacts and report a separate `analysis_export_error` if a generic
+stream copy fails. Native files are written directly by the scanner, so its
+exit status and stderr remain authoritative for native-output failures.
+
+Analysis outputs are mutable working files outside `STATE_DIR`. They are not
+hashed by `integrity.json`, included in terminal-job archives, or deleted when a
+job is archived. Treat them as sensitive untrusted analysis data and manage
+their retention separately.
+
 ## Dashboard and jobs
 
 The dashboard provides:
@@ -462,6 +512,7 @@ The dashboard provides:
 - pause, resume, remove, and force-kill controls where applicable;
 - previewed, confirmed archiving of terminal jobs by age in minutes;
 - escaped last-50-line stdout/stderr views and complete-log downloads;
+- requested analysis artifact paths and any generic export error;
 - manual refresh and five-second opt-in auto-refresh, stopped by default.
 
 Expanded jobs remain open across polls. Routine polls update volatile fields and

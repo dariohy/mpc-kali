@@ -18,7 +18,9 @@ fn installed_configuration_templates_declare_log_directories() {
     let default_config = include_str!("../examples/mcp-kali.conf");
     let reference = include_str!("../examples/mcp-kali.conf.example");
     assert!(default_config.contains("MCP_KALI_LOG_DIR=@MCP_KALI_LOG_DIR@"));
+    assert!(default_config.contains("MCP_KALI_PROJECTS_DIR=@MCP_KALI_PROJECTS_DIR@"));
     assert!(reference.contains("MCP_KALI_MAX_CONCURRENCY=4"));
     assert!(reference.contains("MCP_KALI_DEFAULT_TIMEOUT=432000"));
+    assert!(reference.contains("MCP_KALI_PROJECTS_DIR=~/projects"));
     assert!(reference.contains("RUST_LOG controls normal tracing verbosity"));
 }

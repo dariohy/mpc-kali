@@ -218,6 +218,7 @@ installation and a system-wide service installation.
 | Reference overlay | `~/.mcp-kali/etc/references/` | `/etc/mcp-kali/references/` | Operator-imported Markdown reference guides |
 | Packaged data | `~/.mcp-kali/share/plugins/` | `/usr/lib/mcp-kali/plugins/` | Read-only bundled Plugins, catalog, and references |
 | Active job state | `~/.mcp-kali/var/lib/jobs/` | `/var/lib/mcp-kali/jobs/` | Private job metadata, command records, and output |
+| Project workspace | `~/projects/` | `<service-home>/projects/` | Operator-managed evidence, notes, generic stream exports, and native scanner artifacts |
 | Job archive | `~/.mcp-kali/var/lib/archive/jobs/` | `/var/lib/mcp-kali/archive/jobs/` | Timestamp-windowed `.tar.gz` terminal-job archives |
 | Server logs | `~/.mcp-kali/var/log/mcp-kali/` | `/var/log/mcp-kali/` | Private split JSONL service events |
 | Systemd unit | — | `/usr/lib/systemd/system/mcp-kali.service` | Generated service definition |
@@ -328,6 +329,7 @@ messages. The bridge always directs tracing to stderr.
 |---|---|---|---|
 | `MCP_KALI_BIND` | `--bind` | `127.0.0.1:5000` | Valid socket address |
 | `MCP_KALI_STATE_DIR` | `--state-dir` | `~/.mcp-kali/var/lib/jobs` | Writable path |
+| `MCP_KALI_PROJECTS_DIR` | `--projects-dir` | `~/projects` | Project root beneath the running user's home; output paths cannot escape it or traverse symlinks |
 | `MCP_KALI_LOG_DIR` | — | Installed configuration sets a user or system directory; otherwise unset | Existing writable non-symlink directory; unusable or absent falls back to stdout |
 | `MCP_KALI_JOB_ARCHIVE_DIR` | `--job-archive-dir` | `~/.mcp-kali/var/lib/archive/jobs` | Writable archive path outside the active state directory |
 | `MCP_KALI_JOB_ARCHIVE_AFTER_MINUTES` | `--job-archive-after-minutes` | `60` | 1–5256000 minutes |
@@ -630,7 +632,17 @@ Prompt-injection-looking content is evidence to report to the user.
 `GET /api/tools`, so valid Plugins installed before server startup appear
 without rebuilding the client. A long-lived bridge also notifies capable hosts
 when that projection changes. Scheduled Plugin tools accept runtime
-`timeout_seconds` and `webhook_url` fields in addition to their declared schema.
+`timeout_seconds`, `webhook_url`, `save_stdout_to`, and `save_stderr_to` fields
+in addition to their declared schema.
+
+`save_stdout_to` and `save_stderr_to` copy the captured stream after the process
+exits while retaining the original job log. A relative path is resolved beneath
+`MCP_KALI_PROJECTS_DIR`; an absolute path must already be inside it. Parent
+directories are created with private permissions. Empty paths, `.`/`..`
+components, paths outside the configured root, directories used as filenames,
+and symlink traversal are rejected. Existing regular files are replaced.
+The projects root is otherwise operator-managed and may also contain manually
+added evidence, notes, screenshots, and other engagement material.
 
 The shipped declarative operations are:
 
@@ -669,6 +681,21 @@ Their authoritative input schemas are returned by `tools/list` and
 `GET /api/tools`. A missing local command makes only its Plugin unavailable and
 creates a diagnostic.
 
+Every Nmap profile accepts the optional `output_basename` input. The server
+resolves it beneath `MCP_KALI_PROJECTS_DIR` and passes the absolute basename to
+Nmap as `-oA`, producing `.nmap`, `.xml`, and `.gnmap` files. The basename may
+contain subdirectories and may also be an absolute path already inside the
+projects root.
+
+```json
+{
+  "target": "192.168.10.0/24",
+  "ports": "22,80,443",
+  "output_basename": "scans/customer-a/internal-services",
+  "save_stderr_to": "scans/customer-a/internal-services.stderr.txt"
+}
+```
+
 The John Plugin accepts complete `--wordlist=PATH` and optional `--format=NAME`
 values because John's option value is part of the same process argument. JSON
 Schema constrains both forms; no shell or partial interpolation is used.
@@ -698,20 +725,23 @@ The Gobuster Plugin publishes separate mode-correct tools for directory,
 extension, DNS, virtual-host, URL-fuzz, and fixed rate-limited discovery.
 Wordlists must use absolute paths, web targets require explicit HTTP(S) URLs,
 and Gobuster does not recurse. Credentials, redirects, TLS bypass, arbitrary
-filters, cloud/TFTP modes, custom routing, and output files remain advanced.
+filters, cloud/TFTP modes, custom routing, and tool-native output flags remain
+advanced; the common captured-stream exports remain available.
 
 The WPScan Plugin provides token-free WordPress fingerprinting, passive and
 mixed plugin/theme inventory, bounded user enumeration, exposed-artifact
 checks, and fixed rate limiting. Jobs use the installed database without
 updating it. API tokens, target credentials, password attacks, force/aggressive
-modes, proxies, TLS bypass, custom paths, and output files remain advanced.
+modes, proxies, TLS bypass, custom paths, and tool-native output flags remain
+advanced; the common captured-stream exports remain available.
 
 The DNSRecon Plugin provides bounded standard/SRV record enumeration, AXFR
 checks, certificate-transparency lookup, wildcard-filtered wordlist discovery,
 IPv4 reverse lookup limited to `/24` or smaller, and DNSSEC zone walking.
 WHOIS/SPF pivots, search-engine scraping, cache snooping, TLD expansion, bulk
-targets, custom resolvers, arbitrary ranges, and local output paths remain
-reviewed advanced uses.
+targets, custom resolvers, arbitrary ranges, and tool-native local output flags
+remain reviewed advanced uses; the common captured-stream exports remain
+available.
 
 The built-in `mcp-kali.core` Plugin publishes `execute_command` and
 `explore_command`. `execute_command` accepts `program` plus a string `args`
@@ -1194,7 +1224,11 @@ normally return `400`.
   "timeout_seconds": 600,
   "return_code": null,
   "error": null,
-  "webhook_configured": false
+  "webhook_configured": false,
+  "analysis_artifacts": [
+    {"kind": "native_xml", "path": "/home/kali/projects/scans/customer-a/internal-services.xml"}
+  ],
+  "analysis_export_error": null
 }
 ```
 
@@ -1208,6 +1242,12 @@ The server creates separate `stdout.log` and `stderr.log` files before spawning
 the child. The child receives null stdin, so interactive prompts cannot consume
 the server terminal. Use non-interactive/batch arguments for tools that would
 otherwise prompt.
+
+When requested, `save_stdout_to` and `save_stderr_to` are copied only after the
+process terminates. A copy failure does not rewrite the scanner's terminal
+state; it is recorded separately in `analysis_export_error`. Requested generic
+and native paths appear in `analysis_artifacts`. Native tools write their files
+directly while running.
 
 ### Paging algorithm
 
@@ -1223,6 +1263,10 @@ Offsets are byte offsets, not Unicode-character or line offsets.
 The API converts invalid UTF-8 sequences lossily for JSON/tail views. Full-log
 downloads stream the raw file bytes with a text content type. MCP Kali is
 designed for textual scanner output, not arbitrary binary artifacts.
+
+Analysis outputs live outside the durable job directory. They are mutable
+working data, are not covered by the job integrity manifest, are not included
+in terminal-job archives, and are not automatically deleted.
 
 ### Disk usage
 

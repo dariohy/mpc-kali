@@ -136,6 +136,39 @@ Use JSON Schema constraints such as `required`, `enum`, `oneOf`, lengths, and
 `additionalProperties: false` to make the invocation contract precise. Values
 must never rely on shell quoting because no shell is involved.
 
+### Managed analysis paths
+
+Scheduled tools automatically receive the reserved runtime inputs
+`save_stdout_to` and `save_stderr_to`; Plugin schemas must not define them. To
+let a native executable write one or more artifacts, declare a top-level string
+field in `input_schema`, render it as a whole argument, and list the native
+suffixes under `execution.analysis_paths`:
+
+```yaml
+input_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    output_basename:
+      type: string
+      minLength: 1
+      maxLength: 4096
+execution:
+  program: nmap
+  args:
+    - when: output_basename
+      args: [-oA, "{{output_basename}}"]
+  analysis_paths:
+    output_basename: [.nmap, .xml, .gnmap]
+```
+
+Before rendering, the runtime replaces a supplied field with an absolute path
+beneath `MCP_KALI_PROJECTS_DIR` and records each suffixed path in the public job
+metadata. Each declared field must exist as a string property. Suffixes are
+limited to 32 safe characters and cannot contain separators, control
+characters, or `..`. This mechanism is for output files only; do not use it to
+model arbitrary scanner input paths.
+
 ## External tool files
 
 A file under `tools/` uses this shape:

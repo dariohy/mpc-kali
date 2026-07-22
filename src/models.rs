@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -48,6 +49,22 @@ pub struct Job {
     /// never returned through public APIs or webhook payloads.
     #[serde(skip_serializing, default)]
     pub webhook_url: Option<String>,
+    /// Operator-selected analysis files written outside the durable job tree.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub analysis_artifacts: Vec<AnalysisArtifact>,
+    /// A stream export can fail independently after the scanner process exits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub analysis_export_error: Option<String>,
+    #[serde(skip_serializing, default)]
+    pub stdout_export_path: Option<PathBuf>,
+    #[serde(skip_serializing, default)]
+    pub stderr_export_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AnalysisArtifact {
+    pub kind: String,
+    pub path: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -58,6 +75,12 @@ pub struct SubmitJob {
     pub timeout_seconds: Option<u64>,
     #[serde(default)]
     pub webhook_url: Option<String>,
+    #[serde(default)]
+    pub stdout_export_path: Option<PathBuf>,
+    #[serde(default)]
+    pub stderr_export_path: Option<PathBuf>,
+    #[serde(default)]
+    pub analysis_artifacts: Vec<AnalysisArtifact>,
 }
 
 #[derive(Serialize)]

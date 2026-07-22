@@ -344,12 +344,24 @@ async fn call(client: &reqwest::Client, server: &reqwest::Url, request: &Value) 
     let webhook_url = arguments
         .as_object_mut()
         .and_then(|object| object.remove("webhook_url"));
+    let save_stdout_to = arguments
+        .as_object_mut()
+        .and_then(|object| object.remove("save_stdout_to"));
+    let save_stderr_to = arguments
+        .as_object_mut()
+        .and_then(|object| object.remove("save_stderr_to"));
     let mut body = json!({"arguments":arguments});
     if let Some(timeout_seconds) = timeout_seconds {
         body["timeout_seconds"] = timeout_seconds;
     }
     if let Some(webhook_url) = webhook_url {
         body["webhook_url"] = webhook_url;
+    }
+    if let Some(save_stdout_to) = save_stdout_to {
+        body["save_stdout_to"] = save_stdout_to;
+    }
+    if let Some(save_stderr_to) = save_stderr_to {
+        body["save_stderr_to"] = save_stderr_to;
     }
     api_request(
         client,
