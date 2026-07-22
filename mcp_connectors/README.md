@@ -1,8 +1,8 @@
 # MCP connector packages
 
 This directory contains source-only packaging for Codex and Claude Desktop on
-Apple Silicon macOS. Compiled binaries and generated connector artifacts belong
-under ignored `target/mcp_connectors/`; do not commit them.
+Apple Silicon macOS. Compiled binaries and generated connector artifacts are
+installed under `~/.mcp-kali/`; do not commit them.
 
 ## Prerequisites
 
@@ -12,9 +12,9 @@ Build and install the local stdio bridge on the Mac that runs the MCP host:
 make client-install
 ```
 
-The builders use `mcp-kali-bridge` from `PATH`. Set
-`MCP_KALI_BRIDGE_PATH=/absolute/path/to/mcp-kali-bridge` when the executable is
-elsewhere. They reject non-Apple-Silicon binaries and versions that differ from
+The builders use `~/.mcp-kali/bin/mcp-kali-bridge`, which `make client-install`
+creates. Set `MCP_KALI_HOME=/absolute/path` to stage an isolated installation
+root. They reject non-Apple-Silicon binaries and versions that differ from
 `Cargo.toml`.
 
 ## Codex
@@ -26,12 +26,16 @@ absolute path:
 make connector-codex
 ```
 
-The result is `target/mcp_connectors/codex`. Add that directory as a local
-Codex marketplace, install the `mcp-kali` plugin, and start a new task:
+The result is `~/.mcp-kali/codex`. Build it and install the `mcp-kali` plugin
+through the Codex executable bundled with ChatGPT:
 
 ```bash
-codex plugin marketplace add "$PWD/target/mcp_connectors/codex"
+make connector-codex-install
 ```
+
+That target adds the generated directory as the `personal` marketplace,
+installs `mcp-kali@personal`, and lists the configured marketplaces. It passes
+an absolute path because a quoted `~` is not expanded by the shell.
 
 The plugin bundles the `use-mcp-kali` skill and uses the bridge's normal
 config-file or environment precedence for the server URL.
@@ -50,9 +54,10 @@ Then build the bundle:
 make connector-claude-desktop
 ```
 
-The resulting `target/mcp_connectors/mcp-kali-<version>-aarch64-apple-darwin.mcpb`
-can be dragged onto Claude Desktop. Its setup form defaults to the loopback MCP
-Kali server and requires an explicit opt-in for remote cleartext HTTP.
+The resulting `~/.mcp-kali/plugins/mcp-kali.mcpb` can be dragged onto Claude
+Desktop. It includes a copy of `~/.mcp-kali/bin/mcp-kali-bridge`. Its setup form
+defaults to the loopback MCP Kali server and requires an explicit opt-in for
+remote cleartext HTTP.
 
 ## Validation
 

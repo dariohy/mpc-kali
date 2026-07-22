@@ -5,6 +5,11 @@ PYTHON_BIN ?= python3
 VERSION := $(shell awk -F '"' '/^version = / { print $$2; exit }' Cargo.toml)
 MCP_KALI_HOME ?= $(HOME)/.mcp-kali
 INSTALL_DIR ?= $(MCP_KALI_HOME)/bin
+MCP_KALI_BRIDGE_PATH ?= $(INSTALL_DIR)/$(CLIENT_BIN)
+CODEX_CONNECTOR_DIR ?= $(MCP_KALI_HOME)/codex
+CLAUDE_PLUGIN_DIR ?= $(MCP_KALI_HOME)/plugins
+CLAUDE_CONNECTOR_FILE ?= $(CLAUDE_PLUGIN_DIR)/mcp-kali.mcpb
+CODEX_CLI ?= /Applications/ChatGPT.app/Contents/Resources/codex
 CONFIG_DIR ?= $(MCP_KALI_HOME)/etc
 DATA_DIR ?= $(MCP_KALI_HOME)/share
 STATE_DIR ?= $(MCP_KALI_HOME)/var/lib/jobs
@@ -41,7 +46,7 @@ SYSTEM_LOGROTATE_FILE := $(LOGROTATE_DIR)/mcp-kali
 
 .PHONY: help fmt fmt-check check clippy test build client release verify run-server run-client \
 	completions client-install install-local checksum security sbom clean \
-	connectors connectors-check connector-codex connector-claude-desktop \
+	connectors connectors-check connector-codex connector-codex-install connector-claude-desktop \
 	install install-local install-system uninstall uninstall-local uninstall-system \
 	systemd-reload enable-system disable-system status-system logs-system logs-json-system archive-jobs-system
 
@@ -62,8 +67,9 @@ help:
 	@echo "  client-install Build and locally install only mcp-kali-bridge"
 	@echo "  connectors    Build Codex and Claude Desktop connectors for Apple Silicon"
 	@echo "  connectors-check Validate connector source manifests and the bundled skill"
-	@echo "  connector-codex Prepare a local Codex plugin marketplace under target/"
-	@echo "  connector-claude-desktop Build an Apple Silicon Claude Desktop MCPB"
+	@echo "  connector-codex Prepare a Codex plugin marketplace under ~/.mcp-kali/codex"
+	@echo "  connector-codex-install Build and install the Codex plugin through ChatGPT's bundled CLI"
+	@echo "  connector-claude-desktop Build ~/.mcp-kali/plugins/mcp-kali.mcpb"
 	@echo "  install       Install locally as a user, or system-wide as root"
 	@echo "  install-local Create a self-contained per-user installation under ~/.mcp-kali"
 	@echo "  install-system Install binaries, read-only data, config template, and systemd unit (root; defaults to kali)"
@@ -141,10 +147,16 @@ connectors-check:
 	PYTHON_BIN="$(PYTHON_BIN)" sh mcp_connectors/scripts/validate-source.sh
 
 connector-codex:
-	MCP_KALI_BRIDGE_PATH="$(MCP_KALI_BRIDGE_PATH)" sh mcp_connectors/scripts/build-codex.sh
+	MCP_KALI_HOME="$(MCP_KALI_HOME)" MCP_KALI_BRIDGE_PATH="$(MCP_KALI_BRIDGE_PATH)" CODEX_CONNECTOR_DIR="$(CODEX_CONNECTOR_DIR)" sh mcp_connectors/scripts/build-codex.sh
+
+connector-codex-install: connector-codex
+	@test -x "$(CODEX_CLI)" || { echo "Codex CLI not found or not executable: $(CODEX_CLI)" >&2; exit 2; }
+	"$(CODEX_CLI)" plugin marketplace add "$(abspath $(CODEX_CONNECTOR_DIR))"
+	"$(CODEX_CLI)" plugin add mcp-kali@personal
+	"$(CODEX_CLI)" plugin marketplace list
 
 connector-claude-desktop:
-	MCP_KALI_BRIDGE_PATH="$(MCP_KALI_BRIDGE_PATH)" sh mcp_connectors/scripts/build-claude-desktop.sh
+	MCP_KALI_HOME="$(MCP_KALI_HOME)" MCP_KALI_BRIDGE_PATH="$(MCP_KALI_BRIDGE_PATH)" CLAUDE_CONNECTOR_FILE="$(CLAUDE_CONNECTOR_FILE)" sh mcp_connectors/scripts/build-claude-desktop.sh
 
 install-local: release
 	@test "$$(id -u)" -ne 0 || { echo "install-local is for a non-root user; use make install MCP_KALI_USER=<authorized-user> as root" >&2; exit 2; }

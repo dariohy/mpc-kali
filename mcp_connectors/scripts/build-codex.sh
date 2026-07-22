@@ -4,16 +4,14 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd -P)
 SOURCE_ROOT="$REPO_ROOT/mcp_connectors/codex"
-OUTPUT_ROOT="$REPO_ROOT/target/mcp_connectors/codex"
+MCP_KALI_HOME=${MCP_KALI_HOME:-$HOME/.mcp-kali}
+OUTPUT_ROOT=${CODEX_CONNECTOR_DIR:-$MCP_KALI_HOME/codex}
 SOURCE_MCP="$SOURCE_ROOT/plugins/mcp-kali/.mcp.json"
 OUTPUT_MCP="$OUTPUT_ROOT/plugins/mcp-kali/.mcp.json"
 
-bridge_path=${MCP_KALI_BRIDGE_PATH:-}
-if [ -z "$bridge_path" ]; then
-  bridge_path=$(command -v mcp-kali-bridge || true)
-fi
+bridge_path=${MCP_KALI_BRIDGE_PATH:-$MCP_KALI_HOME/bin/mcp-kali-bridge}
 if [ -z "$bridge_path" ] || [ ! -x "$bridge_path" ]; then
-  echo "mcp-kali-bridge was not found; run 'make client-install' or set MCP_KALI_BRIDGE_PATH" >&2
+  echo "mcp-kali-bridge was not found at $bridge_path; run 'make client-install' or set MCP_KALI_BRIDGE_PATH" >&2
   exit 2
 fi
 
@@ -48,7 +46,12 @@ if [ "$source_version" != "$expected_version" ]; then
   exit 2
 fi
 
-mkdir -p "$REPO_ROOT/target/mcp_connectors"
+if [ "$OUTPUT_ROOT" != "$MCP_KALI_HOME/codex" ]; then
+  echo "Codex connector output must be $MCP_KALI_HOME/codex" >&2
+  exit 2
+fi
+
+mkdir -p "$(dirname -- "$OUTPUT_ROOT")"
 rm -rf "$OUTPUT_ROOT"
 cp -R "$SOURCE_ROOT" "$OUTPUT_ROOT"
 escaped_bridge=$(printf '%s' "$bridge_path" | sed 's/[&|]/\\&/g')

@@ -419,9 +419,10 @@ the Kali server, and connects to the server URL supplied in `args`.
 
 Apple Silicon source packages for Codex and Claude Desktop live under
 [`mcp_connectors/`](mcp_connectors/README.md). After installing the bridge, use
-`make connector-codex` to prepare a local Codex marketplace or
-`make connector-claude-desktop` to generate a `.mcpb`. Generated packages and
-their copied bridge binary remain under ignored `target/mcp_connectors/`.
+`make connector-codex-install` to prepare and install the local Codex plugin, or
+`make connector-claude-desktop` to generate a `.mcpb`. Generated packages live
+at `~/.mcp-kali/codex` and `~/.mcp-kali/plugins/mcp-kali.mcpb`; both builders use
+the installed `~/.mcp-kali/bin/mcp-kali-bridge`.
 
 The client retrieves current tools and references from the server for MCP
 `tools/list`, `resources/list`, and `resources/read` requests. It forwards tool
